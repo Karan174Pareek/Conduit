@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | default "letsencrypt-prod" }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | default "traefik" }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - "shop.{{ .Values.global.domain }}"
+      secretName: {{ include "woocommerce-store.fullname" . }}-tls
+  {{- end }}
+  rules:
+    - host: "shop.{{ .Values.global.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "woocommerce-store.fullname" . }}-wordpress
+                port:
+                  number: 80

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-wp-content
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.wpContentSize }}

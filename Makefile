@@ -34,6 +34,7 @@ secrets:
 .PHONY: build
 build:
 	npm run build
+	docker build -t conduit/wordpress:6.7.2-wc9.6.2 images/wordpress
 
 .PHONY: test
 test:
@@ -82,7 +83,7 @@ uninstall:
 .PHONY: load
 load:
 	@echo "Loading images into k3d cluster..."
-	# To be populated as application images are built in future phases
+	k3d image import conduit/wordpress:6.7.2-wc9.6.2 -c conduit
 
 .PHONY: e2e
 e2e:
