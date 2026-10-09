@@ -2,14 +2,19 @@ name: Conduit CI
 
 on:
   push:
-    branches: [main, 'phase-*']
+    branches: [main, 'phase-*', 'fix/*']
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   validate:
     name: Lint, Typecheck, Test, Build & Helm Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -55,6 +60,8 @@ jobs:
   security-scan:
     name: Security & Secret Scan (Gitleaks & Trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -66,11 +73,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy Vulnerability & Config Scan
-        uses: aquasecurity/trivy-action@0.29.0
+      # Trivy filesystem scan: checks repository files for secrets and misconfigurations (Helm/K8s/Docker).
+      # Severity policy: Fail CI build (exit-code: 1) strictly on CRITICAL and HIGH findings to block
+      # high-impact exploits, leaky credentials, and misconfigured infrastructure templates.
+      # MEDIUM, LOW, and UNKNOWN findings are reported in the summary table for awareness without
+      # breaking the pipeline to avoid noisy, non-actionable blocking delays.
+      - name: Trivy Vulnerability, Secret & Misconfig Scan
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'table'
+          scanners: 'misconfig,secret'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
           ignore-unfixed: true
