@@ -35,7 +35,18 @@ The canonical specifications and design documents live in [`docs/`](docs/):
   - `gateway.localhost` -> Stateless Streamable HTTP MCP Front Door (`/mcp`)
   - `shop.localhost` -> WooCommerce Storefront & WP Admin
 - Modern web browsers natively resolve `*.localhost` to `127.0.0.1`.
-- For CLI/Node tools, entries can be mapped in `hosts` or configured via `global.domain=127.0.0.1.nip.io`.
+- **Hosts-file Fallback**: If CLI tools (e.g. `curl`, Node) or local resolvers in Windows or WSL do not automatically resolve `*.localhost` subdomains, add the following static entries:
+  - **Windows** (`C:\Windows\System32\drivers\etc\hosts`):
+    ```hosts
+    127.0.0.1 dashboard.localhost gateway.localhost shop.localhost whoami.localhost
+    ::1       dashboard.localhost gateway.localhost shop.localhost whoami.localhost
+    ```
+  - **WSL / Linux** (`/etc/hosts`):
+    ```hosts
+    127.0.0.1 dashboard.localhost gateway.localhost shop.localhost whoami.localhost
+    ::1       dashboard.localhost gateway.localhost shop.localhost whoami.localhost
+    ```
+  - Alternatively, configure wildcards via `global.domain=127.0.0.1.nip.io`.
 - **Port 80**: Bound directly to the k3d load balancer (`80:80@loadbalancer`). If port 80 is occupied, set `global.publicPort=8080`.
 
 ---

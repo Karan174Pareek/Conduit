@@ -1,0 +1,6 @@
+apiVersion: v2
+name: woocommerce-store
+description: WooCommerce Store and woo-mcp Chart for Conduit
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

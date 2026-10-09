@@ -1,0 +1,71 @@
+# values/values-prod.yaml - Production k3s VPS Values
+global:
+  domain: conduit.example.com
+  publicPort: 443
+
+ingress:
+  className: traefik
+  tls:
+    enabled: true
+    certManagerIssuer: letsencrypt-prod
+
+images:
+  pullPolicy: Always
+  repository: ghcr.io/karan174pareek/conduit
+
+storage:
+  className: local-path
+  mariadbSize: 20Gi
+  wpContentSize: 10Gi
+  mongodbSize: 10Gi
+
+gateway:
+  replicas: 2
+  pdb:
+    enabled: true
+    minAvailable: 1
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+dashboard:
+  replicas: 2
+  pdb:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+secrets:
+  existingConduitSecret: conduit-secrets
+  existingStoreSecret: store-secrets
+
+chat:
+  confirmDestructive: true
+
+policy:
+  defaultMember: deny
+
+networkPolicy:
+  enabled: true
+
+metrics:
+  serviceMonitor:
+    enabled: true
+
+demo:
+  rogue:
+    enabled: false

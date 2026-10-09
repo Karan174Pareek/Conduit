@@ -1,0 +1,56 @@
+global:
+  domain: localhost
+  publicPort: 80
+
+ingress:
+  className: traefik
+  tls:
+    enabled: false
+
+images:
+  pullPolicy: IfNotPresent
+  repository: conduit
+
+storage:
+  className: local-path
+  mongodbSize: 2Gi
+
+gateway:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+dashboard:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+secrets:
+  existingConduitSecret: conduit-secrets
+
+chat:
+  confirmDestructive: false
+
+policy:
+  defaultMember: allow
+
+networkPolicy:
+  enabled: true
+
+metrics:
+  serviceMonitor:
+    enabled: false
+
+demo:
+  rogue:
+    enabled: false

@@ -1,0 +1,76 @@
+name: Conduit CI
+
+on:
+  push:
+    branches: [main, 'phase-*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Lint, Typecheck, Test, Build & Helm Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Typecheck
+        run: npm run typecheck
+
+      - name: Run Unit Tests (Vitest)
+        run: npm run test
+
+      - name: Build Packages & Apps
+        run: npm run build
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: Helm Lint
+        run: |
+          helm lint charts/conduit
+          helm lint charts/woocommerce-store
+
+      - name: Helm Template (Local & Prod Values)
+        run: |
+          helm template conduit charts/conduit -f values/values-local.yaml > /dev/null
+          helm template conduit charts/conduit -f values/values-prod.yaml > /dev/null
+          helm template store charts/woocommerce-store -f values/values-local.yaml > /dev/null
+          helm template store charts/woocommerce-store -f values/values-prod.yaml > /dev/null
+
+  security-scan:
+    name: Security & Secret Scan (Gitleaks & Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trivy Vulnerability & Config Scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true

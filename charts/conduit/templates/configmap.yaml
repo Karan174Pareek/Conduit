@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "conduit.fullname" . }}-config
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+data:
+  PUBLIC_DASHBOARD_URL: "http://dashboard.{{ .Values.global.domain }}"
+  PUBLIC_GATEWAY_URL: "http://gateway.{{ .Values.global.domain }}"
+  PUBLIC_PORT: "{{ .Values.global.publicPort }}"
