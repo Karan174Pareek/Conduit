@@ -79,7 +79,7 @@ jobs:
       # MEDIUM, LOW, and UNKNOWN findings are reported in the summary table for awareness without
       # breaking the pipeline to avoid noisy, non-actionable blocking delays.
       - name: Trivy Vulnerability, Secret & Misconfig Scan
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
