@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "conduit-api-key"
+description = "Conduit Member API Key"
+regex = '''mcpgw_[a-zA-Z0-9_-]{16,}'''
+tags = ["key", "conduit"]
+
+[[rules]]
+id = "conduit-enc-key"
+description = "Conduit Credential Encryption Key"
+regex = '''kid\d+:[A-Za-z0-9+/]{32,}={0,2}'''
+tags = ["encryption", "conduit"]
