@@ -4,6 +4,11 @@ global:
 
 images:
   pullPolicy: IfNotPresent
+  # Documented Security Exception (SECURITY.md §7):
+  # The official WordPress (Apache) image starts as root to bind port 80 and setuid to www-data (UID 33).
+  # Mitigations: drop all capabilities except minimal set (CHOWN, FOWNER, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE),
+  # seccomp RuntimeDefault, readOnlyRootFilesystem with tmpfs mounts, automountServiceAccountToken disabled,
+  # default-deny NetworkPolicy, and baseline Pod Security. Scoped Trivy rule DS-0002 ignore documented in .trivyignore.yaml.
   wordpress: conduit/wordpress:6.7.2-wc9.6.2
   mariadb: mariadb:11.4.5
   wooMcp: conduit/woo-mcp:latest

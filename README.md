@@ -73,3 +73,10 @@ The canonical specifications and design documents live in [`docs/`](docs/):
    ```bash
    curl http://whoami.localhost
    ```
+
+---
+
+## Security & Hardening Exceptions
+
+- **WordPress Container User (Trivy DS-0002)**: The official WordPress (`wordpress:6.7.2-apache`) image starts as root to bind port 80 and setuid to `www-data` (UID 33). This is a documented exception (see [docs/SECURITY.md §7](docs/SECURITY.md#7-kubernetes-hardening-checklist)). Mitigations: drop all capabilities except the minimal required set (`CHOWN, FOWNER, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE`), enforce seccomp `RuntimeDefault`, disable `automountServiceAccountToken`, enforce default-deny `NetworkPolicy`, configure `readOnlyRootFilesystem: true` with isolated `tmpfs` mounts, and run within the `baseline` Pod Security Standard. Scoped ignore configured in `.trivyignore.yaml`.
+
