@@ -35,6 +35,7 @@ secrets:
 build:
 	npm run build
 	docker build -t conduit/wordpress:6.7.2-wc9.6.2 images/wordpress
+	docker build -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
 
 .PHONY: test
 test:
@@ -84,6 +85,7 @@ uninstall:
 load:
 	@echo "Loading images into k3d cluster..."
 	k3d image import conduit/wordpress:6.7.2-wc9.6.2 -c conduit
+	k3d image import conduit/woo-mcp:latest -c conduit
 
 .PHONY: e2e
 e2e:
