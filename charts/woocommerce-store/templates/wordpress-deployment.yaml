@@ -34,6 +34,7 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -92,9 +93,25 @@ spec:
               cpu: 1000m
               memory: 768Mi
           volumeMounts:
+            - name: html
+              mountPath: /var/www/html
             - name: wp-content
               mountPath: /var/www/html/wp-content
+            - name: tmp
+              mountPath: /tmp
+            - name: run-apache
+              mountPath: /var/run/apache2
+            - name: lock-apache
+              mountPath: /var/lock/apache2
       volumes:
+        - name: html
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: run-apache
+          emptyDir: {}
+        - name: lock-apache
+          emptyDir: {}
         - name: wp-content
           persistentVolumeClaim:
             claimName: {{ include "woocommerce-store.fullname" . }}-wp-content

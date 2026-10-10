@@ -26,6 +26,7 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
           ports:
             - containerPort: 3306
               name: mysql
@@ -72,6 +73,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/mysql
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run/mysqld
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: data
