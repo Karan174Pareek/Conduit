@@ -1,0 +1,13 @@
+# Trivy ignore configuration scoped by path
+# Reference: https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml
+# and docs/SECURITY.md section 7
+
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - images/wordpress/Dockerfile
+    statement: "Official WordPress Apache image starts as root to bind port 80 and setuid to www-data; mitigated by dropping capabilities in the Pod securityContext, seccomp RuntimeDefault, no service-account token, default-deny NetworkPolicy, baseline Pod Security (docs/SECURITY.md §7)."
+  - id: AVD-DS-0002
+    paths:
+      - images/wordpress/Dockerfile
+    statement: "Official WordPress Apache image starts as root to bind port 80 and setuid to www-data; mitigated by dropping capabilities in the Pod securityContext, seccomp RuntimeDefault, no service-account token, default-deny NetworkPolicy, baseline Pod Security (docs/SECURITY.md §7)."
