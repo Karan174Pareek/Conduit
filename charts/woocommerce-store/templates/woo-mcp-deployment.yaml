@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-woo-mcp
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: woo-mcp
+spec:
+  replicas: {{ .Values.wooMcp.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "woocommerce-store.name" . }}-woo-mcp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "woocommerce-store.name" . }}-woo-mcp
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: woo-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: woo-mcp
+          image: {{ .Values.images.wooMcp }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 3100
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3100"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: WORDPRESS_URL
+              value: "http://{{ include "woocommerce-store.fullname" . }}-wordpress:80"
+            - name: STORE_TIMEZONE
+              value: {{ .Values.wooMcp.timezone | default "Asia/Kolkata" | quote }}
+            - name: MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WOO_MCP_BEARER_TOKEN
+            - name: WP_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WP_CONSUMER_KEY
+            - name: WP_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WP_CONSUMER_SECRET
+          resources:
+            requests:
+              cpu: {{ .Values.wooMcp.resources.requests.cpu | default "50m" }}
+              memory: {{ .Values.wooMcp.resources.requests.memory | default "96Mi" }}
+            limits:
+              cpu: {{ .Values.wooMcp.resources.limits.cpu | default "250m" }}
+              memory: {{ .Values.wooMcp.resources.limits.memory | default "192Mi" }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

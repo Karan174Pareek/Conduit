@@ -24,3 +24,14 @@ ingress:
 
 networkPolicy:
   enabled: true
+
+wooMcp:
+  replicas: 1
+  timezone: Asia/Kolkata
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 250m
+      memory: 192Mi
