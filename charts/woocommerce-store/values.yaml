@@ -4,8 +4,8 @@ global:
 
 images:
   pullPolicy: IfNotPresent
-  wordpress: conduit/wordpress:latest
-  mariadb: mariadb:11.4
+  wordpress: conduit/wordpress:6.7.2-wc9.6.2
+  mariadb: mariadb:11.4.5
   wooMcp: conduit/woo-mcp:latest
 
 storage:
@@ -15,6 +15,12 @@ storage:
 
 secrets:
   existingStoreSecret: store-secrets
+
+ingress:
+  className: traefik
+  tls:
+    enabled: false
+    clusterIssuer: letsencrypt-prod
 
 networkPolicy:
   enabled: true

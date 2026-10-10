@@ -1,0 +1,100 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-default-deny
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-mariadb
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mariadb
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woocommerce-store.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mariadb
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow MySQL from WordPress, setup-job, and store pods
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce-store.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3306
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-wordpress
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: wordpress
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woocommerce-store.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: wordpress
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow HTTP from Traefik Ingress controller and in-cluster workloads
+    - ports:
+        - protocol: TCP
+          port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-store-egress
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woocommerce-store.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # Allow HTTP from store components (woo-mcp, internal clients) to WordPress
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce-store.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: wordpress
+      ports:
+        - protocol: TCP
+          port: 80
+    # Allow MySQL from store components (WordPress and setup-job) to MariaDB
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce-store.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: mariadb
+      ports:
+        - protocol: TCP
+          port: 3306
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

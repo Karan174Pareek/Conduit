@@ -40,3 +40,24 @@ Selector labels
 app.kubernetes.io/name: {{ include "woocommerce-store.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+MariaDB host
+*/}}
+{{- define "woocommerce-store.mariadbHost" -}}
+{{- printf "%s-mariadb" (include "woocommerce-store.fullname" .) -}}
+{{- end }}
+
+{{/*
+Shop public URL
+*/}}
+{{- define "woocommerce-store.shopUrl" -}}
+{{- $port := .Values.global.publicPort | default 80 | int -}}
+{{- if eq $port 80 -}}
+{{- printf "http://shop.%s" .Values.global.domain -}}
+{{- else if eq $port 443 -}}
+{{- printf "https://shop.%s" .Values.global.domain -}}
+{{- else -}}
+{{- printf "http://shop.%s:%d" .Values.global.domain $port -}}
+{{- end -}}
+{{- end }}

@@ -1,0 +1,216 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-setup
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setup-job
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "woocommerce-store.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: setup-job
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: setup
+          image: "{{ .Values.images.wordpress | default "conduit/wordpress:6.7.2-wc9.6.2" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - FOWNER
+                - SETUID
+                - SETGID
+                - DAC_OVERRIDE
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: "{{ include "woocommerce-store.mariadbHost" . }}:3306"
+            - name: WORDPRESS_DB_NAME
+              value: "wordpress"
+            - name: WORDPRESS_DB_USER
+              value: "wordpress"
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: MARIADB_PASSWORD
+            - name: WP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WP_ADMIN_PASSWORD
+            - name: WP_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WP_CONSUMER_KEY
+            - name: WP_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingStoreSecret }}
+                  key: WP_CONSUMER_SECRET
+            - name: SHOP_URL
+              value: "{{ include "woocommerce-store.shopUrl" . }}"
+          volumeMounts:
+            - name: wp-content
+              mountPath: /var/www/html/wp-content
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              echo "=== Starting Conduit WooCommerce Store Setup ==="
+
+              DB_HOST="${WORDPRESS_DB_HOST%:*}"
+              DB_PORT="${WORDPRESS_DB_HOST#*:}"
+
+              echo "1. Waiting for MariaDB at ${DB_HOST}:${DB_PORT}..."
+              until mysqladmin ping -h "${DB_HOST}" -P "${DB_PORT}" -u "${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" --silent; do
+                echo "Waiting for MariaDB connection..."
+                sleep 2
+              done
+              echo "MariaDB is ready and accepting connections."
+
+              cd /var/www/html
+
+              # Ensure WordPress core files exist in /var/www/html
+              if [ ! -f /var/www/html/wp-includes/version.php ]; then
+                echo "2. Initializing WordPress core files from /usr/src/wordpress..."
+                cp -r --no-preserve=all /usr/src/wordpress/. /var/www/html/
+              fi
+
+              # Ensure wp-config.php exists
+              if [ ! -f /var/www/html/wp-config.php ]; then
+                echo "3. Generating wp-config.php..."
+                wp config create \
+                  --dbname="${WORDPRESS_DB_NAME}" \
+                  --dbuser="${WORDPRESS_DB_USER}" \
+                  --dbpass="${WORDPRESS_DB_PASSWORD}" \
+                  --dbhost="${WORDPRESS_DB_HOST}" \
+                  --extra-php="define('WP_HOME', '${SHOP_URL}'); define('WP_SITEURL', '${SHOP_URL}'); define('FORCE_SSL_ADMIN', false);" \
+                  --allow-root --skip-check
+              fi
+
+              # Ensure core is installed
+              if ! wp core is-installed --allow-root; then
+                echo "3. Installing WordPress core..."
+                wp core install \
+                  --url="${SHOP_URL}" \
+                  --title="Conduit Store" \
+                  --admin_user="admin" \
+                  --admin_password="${WP_ADMIN_PASSWORD}" \
+                  --admin_email="admin@conduit.localhost" \
+                  --skip-email \
+                  --allow-root
+              else
+                echo "3. WordPress core already installed. Verifying site URLs..."
+                wp option update siteurl "${SHOP_URL}" --allow-root
+                wp option update home "${SHOP_URL}" --allow-root
+              fi
+
+              # Ensure baked-in WooCommerce plugin and mu-plugins are in wp-content
+              echo "4. Syncing baked-in WooCommerce and mu-plugins into persistent volume..."
+              mkdir -p /var/www/html/wp-content/plugins /var/www/html/wp-content/mu-plugins
+              if [ ! -d /var/www/html/wp-content/plugins/woocommerce ]; then
+                cp -r --no-preserve=all /usr/src/wordpress/wp-content/plugins/woocommerce /var/www/html/wp-content/plugins/
+              fi
+              cp --no-preserve=all /usr/src/wordpress/wp-content/mu-plugins/00-conduit-store.php /var/www/html/wp-content/mu-plugins/
+              chown -R www-data:www-data /var/www/html/wp-content
+
+              # Activate WooCommerce plugin
+              echo "5. Activating WooCommerce..."
+              wp plugin activate woocommerce --allow-root
+
+              # Set permalinks, currency, timezone
+              echo "6. Configuring permalinks, currency, and timezone..."
+              wp rewrite structure '/%postname%/' --allow-root
+              wp option update woocommerce_currency 'USD' --allow-root
+              wp option update timezone_string 'UTC' --allow-root
+
+              # Configure payment gateways: enable Cash on Delivery (COD), disable BACS and Cheque
+              echo "7. Configuring payment gateways (COD only)..."
+              wp option update woocommerce_cod_settings '{"enabled":"yes"}' --format=json --allow-root
+              wp option update woocommerce_bacs_settings '{"enabled":"no"}' --format=json --allow-root
+              wp option update woocommerce_cheque_settings '{"enabled":"no"}' --format=json --allow-root
+
+              # Ensure at least one sample product exists
+              echo "8. Checking sample product..."
+              PRODUCT_COUNT=$(wp post list --post_type=product --format=count --allow-root 2>/dev/null || echo "0")
+              if [ "${PRODUCT_COUNT}" -eq 0 ]; then
+                echo "Creating sample product..."
+                wp wc product create \
+                  --name="Conduit Edge Node" \
+                  --type=simple \
+                  --regular_price="249.00" \
+                  --description="High-availability team MCP gateway appliance." \
+                  --status=publish \
+                  --user=1 \
+                  --allow-root
+              else
+                echo "Product already exists (${PRODUCT_COUNT} products found)."
+              fi
+
+              # Idempotently insert/update REST API consumer key into wp_woocommerce_api_keys
+              echo "9. Syncing WooCommerce REST API keys..."
+              wp eval '
+                $ck = getenv("WP_CONSUMER_KEY");
+                $cs = getenv("WP_CONSUMER_SECRET");
+                $hashed_ck = hash_hmac("sha256", $ck, "wc-api");
+                $truncated = substr($ck, -7);
+
+                global $wpdb;
+                $table = $wpdb->prefix . "woocommerce_api_keys";
+                $existing = $wpdb->get_var($wpdb->prepare("SELECT key_id FROM {$table} WHERE description = %s", "Conduit woo-mcp"));
+
+                if ($existing) {
+                  $wpdb->update($table, array(
+                    "user_id" => 1,
+                    "permissions" => "read_write",
+                    "consumer_key" => $hashed_ck,
+                    "consumer_secret" => $cs,
+                    "truncated_key" => $truncated
+                  ), array("key_id" => $existing));
+                  echo "Updated existing Conduit API key record (ID: {$existing})\n";
+                } else {
+                  $wpdb->insert($table, array(
+                    "user_id" => 1,
+                    "description" => "Conduit woo-mcp",
+                    "permissions" => "read_write",
+                    "consumer_key" => $hashed_ck,
+                    "consumer_secret" => $cs,
+                    "truncated_key" => $truncated
+                  ));
+                  echo "Inserted new Conduit API key record into database\n";
+                }
+              ' --allow-root
+
+              # Mark setup completed
+              wp option update conduit_setup_completed 1 --allow-root
+              echo "=== Setup complete! ==="
+      volumes:
+        - name: wp-content
+          persistentVolumeClaim:
+            claimName: {{ include "woocommerce-store.fullname" . }}-wp-content
