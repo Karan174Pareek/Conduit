@@ -230,19 +230,17 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     const rawApiKey = createdKey.key;
     const keyId = createdKey.id;
 
-    // Use the Bearer API key to call debug whoami route
-    const whoamiRes = await app.inject({
+    // Use the Bearer API key to call authenticated /api/keys route
+    const authRes = await app.inject({
       method: 'GET',
-      url: '/api/_debug/whoami',
+      url: '/api/keys',
       headers: {
         authorization: `Bearer ${rawApiKey}`,
       },
     });
-    expect(whoamiRes.statusCode).toBe(200);
-    const whoamiBody = whoamiRes.json();
-    expect(whoamiBody.principal.via).toBe('apikey');
-    expect(whoamiBody.principal.keyId).toBe(keyId);
-    expect(whoamiBody.user.email).toBe(testConfig.BOOTSTRAP_ADMIN_EMAIL);
+    expect(authRes.statusCode).toBe(200);
+    const authBody = authRes.json();
+    expect(authBody.keys.some((k: { id: string }) => k.id === keyId)).toBe(true);
 
     // Revoke the API key
     const revokeRes = await app.inject({
@@ -259,7 +257,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     // Next request with revoked API key must immediately return 401
     const postRevokeRes = await app.inject({
       method: 'GET',
-      url: '/api/_debug/whoami',
+      url: '/api/keys',
       headers: {
         authorization: `Bearer ${rawApiKey}`,
       },

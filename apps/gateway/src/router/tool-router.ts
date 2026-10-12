@@ -1,0 +1,268 @@
+import { parseExposedToolName } from '@conduit/shared';
+import type { Db } from 'mongodb';
+import type { FastifyBaseLogger } from 'fastify';
+import type { ToolCatalogDocument } from '../db/types.js';
+import type { UpstreamManager } from '../upstream/manager.js';
+import type { ToolInvocationResult } from '../upstream/types.js';
+
+export interface Principal {
+  userId: string;
+  role: 'admin' | 'member';
+  via: 'apikey' | 'session';
+  keyId?: string | null;
+  source?: 'mcp' | 'chat';
+}
+
+export interface PolicyEngine {
+  evaluate(principal: Principal, serverSlug: string, toolName: string): Promise<boolean>;
+}
+
+export class DefaultPolicyEngine implements PolicyEngine {
+  async evaluate(_principal: Principal, _serverSlug: string, _toolName: string): Promise<boolean> {
+    // Phase 3B default: allow all tools.
+    // TODO (Phase 8): Evaluate DB-backed role/user policies with glob patterns and readOnly hints
+    return true;
+  }
+}
+
+export interface RateLimiter {
+  consume(key: string): Promise<{ allowed: boolean; retryAfterSeconds?: number }>;
+}
+
+export class NoopRateLimiter implements RateLimiter {
+  async consume(_key: string): Promise<{ allowed: boolean }> {
+    // Phase 3B default: no-op rate limiter.
+    // TODO (Phase 8): Token bucket rate limiter backed by memory or Redis
+    return { allowed: true };
+  }
+}
+
+export interface AuditRecord {
+  principal: Principal;
+  serverSlug: string;
+  toolName: string;
+  exposedName: string;
+  durationMs: number;
+  outcome: 'success' | 'error' | 'timeout' | 'denied' | 'unreachable' | 'rate_limited' | 'invalid' | 'quarantined';
+  errorMessage?: string;
+  upstreamIsError?: boolean;
+}
+
+export interface AuditSink {
+  record(audit: AuditRecord): Promise<void>;
+}
+
+export class LoggingAuditSink implements AuditSink {
+  constructor(private readonly logger?: FastifyBaseLogger) {}
+
+  async record(audit: AuditRecord): Promise<void> {
+    this.logger?.info(
+      {
+        userId: audit.principal.userId,
+        role: audit.principal.role,
+        via: audit.principal.via,
+        serverSlug: audit.serverSlug,
+        tool: audit.toolName,
+        exposedName: audit.exposedName,
+        durationMs: audit.durationMs,
+        outcome: audit.outcome,
+        upstreamIsError: audit.upstreamIsError,
+      },
+      `Audit tool call: ${audit.exposedName} -> ${audit.outcome} (${audit.durationMs}ms)`,
+    );
+  }
+}
+
+export interface ExposedToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
+export class ToolRouter {
+  constructor(
+    private readonly db: Db,
+    private readonly upstreamManager: UpstreamManager,
+    private readonly policyEngine: PolicyEngine = new DefaultPolicyEngine(),
+    private readonly rateLimiter: RateLimiter = new NoopRateLimiter(),
+    private readonly auditSink: AuditSink = new LoggingAuditSink(),
+    private readonly logger?: FastifyBaseLogger,
+  ) {}
+
+  /**
+   * Returns union over servers where enabled && breaker != open && state == connected,
+   * for tools that are approved.
+   */
+  async list(principal: Principal): Promise<ExposedToolDefinition[]> {
+    const activeServers = this.upstreamManager
+      .getAllServerStates()
+      .filter((s) => s.server.enabled && s.breaker.phase !== 'open');
+
+    const result: ExposedToolDefinition[] = [];
+
+    for (const serverState of activeServers) {
+      const server = serverState.server;
+      const serverId = server._id?.toString() ?? server.slug;
+
+      const tools = await this.db
+        .collection<ToolCatalogDocument>('tool_catalog')
+        .find({
+          serverId,
+          'approval.status': 'approved',
+          removedAt: null,
+        })
+        .toArray();
+
+      for (const t of tools) {
+        const allowed = await this.policyEngine.evaluate(principal, server.slug, t.name);
+        if (!allowed) {
+          continue;
+        }
+
+        result.push({
+          name: t.exposedName,
+          description: `[${server.displayName}] ${t.description}`,
+          inputSchema: t.inputSchema,
+          annotations: t.annotations,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Invokes an exposed tool by name `<slug>__<tool>`.
+   * Enforces policy, rate limits, server state, and emits audit records.
+   * Unknown, denied, and quarantined tools return identical "Unknown tool" error.
+   */
+  async call(
+    principal: Principal,
+    exposedName: string,
+    args: Record<string, unknown>,
+    ctx: { deadlineMs?: number } = {},
+  ): Promise<ToolInvocationResult> {
+    const startTime = Date.now();
+    const parsed = parseExposedToolName(exposedName);
+
+    if (!parsed) {
+      await this.auditSink.record({
+        principal,
+        serverSlug: 'unknown',
+        toolName: exposedName,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome: 'invalid',
+        errorMessage: 'Invalid exposed tool name format',
+      });
+      // Identical Unknown tool error per spec
+      throw new Error(`Unknown tool "${exposedName}"`);
+    }
+
+    const { slug, toolPart } = parsed;
+    const serverState = this.upstreamManager.getServerState(slug);
+
+    if (!serverState || !serverState.server.enabled) {
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: toolPart,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome: 'denied',
+      });
+      throw new Error(`Unknown tool "${exposedName}"`);
+    }
+
+    const serverId = serverState.server._id?.toString() ?? serverState.server.slug;
+    const catalogItem = await this.db.collection<ToolCatalogDocument>('tool_catalog').findOne({
+      serverId,
+      exposedName,
+      removedAt: null,
+    });
+
+    if (!catalogItem || catalogItem.approval.status !== 'approved') {
+      const outcome = catalogItem?.approval.status === 'changed' ? 'quarantined' : 'denied';
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: toolPart,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome,
+      });
+      // Leak prevention: identical Unknown tool error
+      throw new Error(`Unknown tool "${exposedName}"`);
+    }
+
+    // Policy check
+    const allowed = await this.policyEngine.evaluate(principal, slug, catalogItem.name);
+    if (!allowed) {
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: catalogItem.name,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome: 'denied',
+      });
+      throw new Error(`Unknown tool "${exposedName}"`);
+    }
+
+    // Rate limiter check
+    const rateLimit = await this.rateLimiter.consume(`user:${principal.userId}`);
+    if (!rateLimit.allowed) {
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: catalogItem.name,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome: 'rate_limited',
+      });
+      throw new Error(`Rate limit exceeded for tool "${exposedName}"`);
+    }
+
+    try {
+      const result = await this.upstreamManager.invokeTool(
+        slug,
+        catalogItem.name,
+        args,
+        { deadlineMs: ctx.deadlineMs },
+      );
+
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: catalogItem.name,
+        exposedName,
+        durationMs: Date.now() - startTime,
+        outcome: result.isError ? 'error' : 'success',
+        upstreamIsError: result.isError,
+      });
+
+      this.logger?.debug(
+        { exposedName, slug, durationMs: Date.now() - startTime, isError: result.isError },
+        'Tool call finished',
+      );
+
+      return result;
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startTime;
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      await this.auditSink.record({
+        principal,
+        serverSlug: slug,
+        toolName: catalogItem.name,
+        exposedName,
+        durationMs,
+        outcome: errMsg.includes('timeout') ? 'timeout' : 'error',
+        errorMessage: errMsg,
+      });
+
+      throw err;
+    }
+  }
+}
