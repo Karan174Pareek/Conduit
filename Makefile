@@ -36,6 +36,7 @@ build:
 	npm run build
 	docker build -t conduit/wordpress:6.7.2-wc9.6.2 images/wordpress
 	docker build -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
+	docker build -t conduit/gateway:latest -t conduit/gateway:0.1.0 -f apps/gateway/Dockerfile .
 
 .PHONY: test
 test:
@@ -84,8 +85,10 @@ uninstall:
 .PHONY: load
 load:
 	@echo "Loading images into k3d cluster..."
+	k3d image import mongo:7 -c conduit
 	k3d image import conduit/wordpress:6.7.2-wc9.6.2 -c conduit
 	k3d image import conduit/woo-mcp:latest -c conduit
+	k3d image import conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
 
 .PHONY: e2e
 e2e:
