@@ -93,8 +93,6 @@ spec:
               cpu: 1000m
               memory: 768Mi
           volumeMounts:
-            - name: html
-              mountPath: /var/www/html
             - name: wp-content
               mountPath: /var/www/html/wp-content
             - name: tmp
@@ -104,8 +102,6 @@ spec:
             - name: lock-apache
               mountPath: /var/lock/apache2
       volumes:
-        - name: html
-          emptyDir: {}
         - name: tmp
           emptyDir: {}
         - name: run-apache
