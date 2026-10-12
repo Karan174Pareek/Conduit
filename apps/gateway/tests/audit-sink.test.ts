@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processAuditArguments, sanitizeCsvCell, redactSensitiveKeys } from '../src/audit/redaction.js';
 import { MongoAuditSink } from '../src/audit/sink.js';
 import type { Db } from 'mongodb';
