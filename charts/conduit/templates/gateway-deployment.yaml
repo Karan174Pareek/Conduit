@@ -28,7 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gateway
-          image: "{{ .Values.images.repository }}/gateway:{{ .Chart.AppVersion | default "latest" }}"
+          image: "{{ .Values.images.repository }}/gateway:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           securityContext:
             runAsNonRoot: true

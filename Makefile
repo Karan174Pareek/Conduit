@@ -31,12 +31,16 @@ cluster-down:
 secrets:
 	@bash scripts/gen-secrets.sh
 
+GIT_SHA ?= $(shell git rev-parse --short HEAD)
+
 .PHONY: build
 build:
-	npm run build
-	docker build -t conduit/wordpress:6.7.2-wc9.6.2 images/wordpress
-	docker build -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
-	docker build -t conduit/gateway:latest -t conduit/gateway:0.1.0 -f apps/gateway/Dockerfile .
+	npm run build --workspace=@conduit/shared
+	npm run build --workspace=@conduit/gateway
+	npm run build --workspace=@conduit/woo-mcp
+	docker build -t conduit/wordpress:6.7.2-wc9.6.2 -t conduit/wordpress:$(GIT_SHA) images/wordpress
+	docker build -t conduit/woo-mcp:$(GIT_SHA) -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
+	docker build -t conduit/gateway:$(GIT_SHA) -t conduit/gateway:latest -t conduit/gateway:0.1.0 -f apps/gateway/Dockerfile .
 
 .PHONY: test
 test:
@@ -87,8 +91,17 @@ load:
 	@echo "Loading images into k3d cluster..."
 	k3d image import mongo:7 -c conduit
 	k3d image import conduit/wordpress:6.7.2-wc9.6.2 -c conduit
-	k3d image import conduit/woo-mcp:latest -c conduit
-	k3d image import conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
+	k3d image import conduit/woo-mcp:$(GIT_SHA) conduit/woo-mcp:latest -c conduit
+	k3d image import conduit/gateway:$(GIT_SHA) conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
+
+.PHONY: deploy-local
+deploy-local: build load
+	@echo "Deploying local releases with image tag $(GIT_SHA)..."
+	helm upgrade --install conduit charts/conduit -n conduit-system --create-namespace -f values/values-local.yaml --set images.tag=$(GIT_SHA)
+	helm upgrade --install store charts/woocommerce-store -n store-default --create-namespace -f values/values-local.yaml --set images.wooMcp=conduit/woo-mcp:$(GIT_SHA)
+	kubectl rollout status deployment/conduit-gateway -n conduit-system --timeout=120s
+	kubectl rollout status deployment/store-woocommerce-store-woo-mcp -n store-default --timeout=120s
+	@echo "Local deployment successfully rolled out."
 
 .PHONY: e2e
 e2e:

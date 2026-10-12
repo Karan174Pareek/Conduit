@@ -1,4 +1,4 @@
-import type { Db } from 'mongodb';
+import { type Db, ObjectId } from 'mongodb';
 import { CredentialCrypto } from './crypto.js';
 import type { McpServerDocument } from '../db/types.js';
 import type { FastifyBaseLogger } from 'fastify';
@@ -26,11 +26,14 @@ export async function seedDefaultServers(
 
   if (!existing) {
     logger?.info({ slug: 'woo', url }, 'Seeding default WooCommerce MCP server');
+    const serverObjId = new ObjectId();
+    const serverId = serverObjId.toString();
     const auth = rawToken
-      ? crypto.encryptCredential('woo', rawToken, 'bearer')
+      ? crypto.encryptCredential(serverId, rawToken, 'bearer')
       : { type: 'none' as const };
 
     const doc: McpServerDocument = {
+      _id: serverObjId,
       slug: 'woo',
       displayName: 'WooCommerce (default store)',
       url,
@@ -58,11 +61,11 @@ export async function seedDefaultServers(
   }
 
   // If already exists, verify if URL or token changed
-  const existingId = existing._id?.toString() ?? 'woo';
+  const existingId = existing._id.toString();
   let tokenChanged = false;
   if (rawToken) {
     try {
-      const currentToken = crypto.decryptCredential(existingId, existing.auth, 'woo');
+      const currentToken = crypto.decryptCredential(existingId, existing.auth);
       if (currentToken !== rawToken) {
         tokenChanged = true;
       }
