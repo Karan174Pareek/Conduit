@@ -82,11 +82,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "conduit.fullname" . }}-config
                   key: LOG_LEVEL
-            - name: ENABLE_DEBUG_ROUTES
+            - name: WOO_MCP_URL
               valueFrom:
                 configMapKeyRef:
                   name: {{ include "conduit.fullname" . }}-config
-                  key: ENABLE_DEBUG_ROUTES
+                  key: WOO_MCP_URL
             - name: GEMINI_MODEL
               valueFrom:
                 configMapKeyRef:
@@ -118,6 +118,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.existingConduitSecret }}
                   key: BOOTSTRAP_ADMIN_PASSWORD
+            - name: WOO_MCP_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: WOO_MCP_BEARER_TOKEN
+                  optional: true
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:

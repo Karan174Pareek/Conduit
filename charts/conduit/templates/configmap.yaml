@@ -13,7 +13,7 @@ data:
   ALLOWED_ORIGINS: "http://dashboard.{{ .Values.global.domain }}"
   BOOTSTRAP_ADMIN_EMAIL: "admin@conduit.{{ .Values.global.domain }}"
   LOG_LEVEL: "info"
-  ENABLE_DEBUG_ROUTES: "true"
+  WOO_MCP_URL: "http://store-woocommerce-store-woo-mcp.store-default.svc.cluster.local:3100/mcp"
   GEMINI_MODEL: "gemini-2.5-flash"
 ---
 apiVersion: v1

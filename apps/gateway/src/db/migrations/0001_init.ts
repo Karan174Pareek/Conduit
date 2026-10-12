@@ -26,12 +26,14 @@ export async function up(db: Db): Promise<void> {
 
   // 5. tool_catalog
   await db.createCollection('tool_catalog').catch(() => {});
+  await db.collection('tool_catalog').dropIndex('serverSlug_1_toolName_1').catch(() => {});
+  await db.collection('tool_catalog').dropIndex('approved_1').catch(() => {});
   await db.collection('tool_catalog').createIndex(
-    { serverSlug: 1, toolName: 1 },
+    { serverId: 1, name: 1 },
     { unique: true },
   );
   await db.collection('tool_catalog').createIndex({ exposedName: 1 }, { unique: true });
-  await db.collection('tool_catalog').createIndex({ approved: 1 });
+  await db.collection('tool_catalog').createIndex({ 'approval.status': 1 });
 
   // 6. tool_calls (90-day retention TTL)
   await db.createCollection('tool_calls').catch(() => {});

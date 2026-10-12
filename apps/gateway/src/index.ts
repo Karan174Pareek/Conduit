@@ -3,7 +3,11 @@ import { logger } from './logger.js';
 import { connectToDatabase, closeDatabase } from './db/client.js';
 import { runMigrations } from './db/migrations/runner.js';
 import { bootstrapAdmin } from './services/bootstrap.js';
+import { seedDefaultServers } from './registry/seed.js';
 import { buildApp } from './app.js';
+import type { UpstreamManager } from './upstream/manager.js';
+import type { CredentialCrypto } from './registry/crypto.js';
+import type { SystemStateDocument } from './db/types.js';
 
 async function main() {
   const config = loadConfig();
@@ -11,13 +15,53 @@ async function main() {
 
   const { db } = await connectToDatabase(config.MONGO_URI);
 
-  // Run forward-only migrations under distributed Mongo lock
+  // 1. Run forward-only migrations under distributed Mongo lock
   await runMigrations(db);
 
-  // Bootstrap initial admin if no admin exists
+  // 2. Bootstrap initial admin if no admin exists
   await bootstrapAdmin(db, config);
 
   const app = buildApp(config, db);
+
+  const upstreamManager = (app as any).upstreamManager as UpstreamManager;
+  const crypto = (app as any).crypto as CredentialCrypto;
+
+  // 3. Seed default first-party servers (idempotent upsert)
+  await seedDefaultServers(
+    db,
+    crypto,
+    {
+      wooMcpUrl: config.WOO_MCP_URL,
+      wooMcpBearerToken: config.WOO_MCP_BEARER_TOKEN,
+    },
+    app.log,
+  );
+
+  // 4. Initial load of servers into in-memory UpstreamManager
+  await upstreamManager.loadServers();
+
+  // 5. Start background health checks and catalog refresh
+  upstreamManager.startBackgroundLoops();
+
+  // 6. Config convergence polling loop (every 5 seconds)
+  let lastKnownConfigVersion = 0;
+  const initialConfigDoc = await db.collection<SystemStateDocument>('system_state').findOne({ _id: 'config' });
+  if (initialConfigDoc?.configVersion) {
+    lastKnownConfigVersion = initialConfigDoc.configVersion;
+  }
+
+  const configConvergenceTimer = setInterval(async () => {
+    try {
+      const doc = await db.collection<SystemStateDocument>('system_state').findOne({ _id: 'config' });
+      if (doc?.configVersion && doc.configVersion !== lastKnownConfigVersion) {
+        lastKnownConfigVersion = doc.configVersion;
+        app.log.info({ configVersion: lastKnownConfigVersion }, 'Detected configVersion change; reloading upstream servers');
+        await upstreamManager.loadServers();
+      }
+    } catch (err) {
+      app.log.debug({ err }, 'Error checking configVersion convergence');
+    }
+  }, 5000);
 
   // Graceful shutdown handling
   let isShuttingDown = false;
@@ -25,6 +69,9 @@ async function main() {
     if (isShuttingDown) return;
     isShuttingDown = true;
     logger.info({ signal }, 'Graceful shutdown initiated');
+
+    clearInterval(configConvergenceTimer);
+    upstreamManager.stopBackgroundLoops();
 
     try {
       await app.close();
