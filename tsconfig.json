@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/shared" },
-    { "path": "./apps/woo-mcp" }
+    { "path": "./apps/woo-mcp" },
+    { "path": "./apps/gateway" }
   ]
 }

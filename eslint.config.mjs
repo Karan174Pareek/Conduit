@@ -5,7 +5,15 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ['**/dist/**', 'node_modules/**', 'coverage/**', 'build/**', '**/*.d.ts', 'scripts/**'],
+    ignores: [
+      '**/dist/**',
+      'node_modules/**',
+      '**/node_modules/**',
+      'coverage/**',
+      'build/**',
+      '**/*.d.ts',
+      'scripts/**',
+    ],
   },
   {
     rules: {
