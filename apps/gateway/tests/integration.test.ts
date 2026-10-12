@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoClient, Db } from 'mongodb';
-import { runMigrations, getCurrentSchemaVersion, isSchemaReady } from '../src/db/migrations/runner.js';
+import { runMigrations, getCurrentSchemaVersion, isSchemaReady, TARGET_SCHEMA_VERSION } from '../src/db/migrations/runner.js';
 import { bootstrapAdmin } from '../src/services/bootstrap.js';
 import { buildApp } from '../src/app.js';
 import type { Config } from '../src/config.js';
@@ -59,7 +59,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     // Run migration 1st time
     await runMigrations(db, 'test-replica-1');
     const version1 = await getCurrentSchemaVersion(db);
-    expect(version1).toBe(1);
+    expect(version1).toBe(TARGET_SCHEMA_VERSION);
 
     const isReady1 = await isSchemaReady(db);
     expect(isReady1).toBe(true);
@@ -79,7 +79,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     // Run migration 2nd time (must be idempotent and succeed without error)
     await runMigrations(db, 'test-replica-1');
     const version2 = await getCurrentSchemaVersion(db);
-    expect(version2).toBe(1);
+    expect(version2).toBe(TARGET_SCHEMA_VERSION);
   });
 
   it('handles two concurrent startups with distributed lock', async () => {
@@ -90,7 +90,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     ]);
 
     const finalVersion = await getCurrentSchemaVersion(db);
-    expect(finalVersion).toBe(1);
+    expect(finalVersion).toBe(TARGET_SCHEMA_VERSION);
   });
 
   it('bootstraps admin user idempotently without duplicates', async () => {
@@ -123,7 +123,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
       url: '/readyz',
     });
     expect(resReady.statusCode).toBe(200);
-    expect(resReady.json()).toMatchObject({ status: 'ready', schemaVersion: 1 });
+    expect(resReady.json()).toMatchObject({ status: 'ready', schemaVersion: TARGET_SCHEMA_VERSION });
   });
 
   it('enforces login verification, cookie session creation, and lockout after 10 failures', async () => {

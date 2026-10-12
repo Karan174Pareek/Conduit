@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Db } from 'mongodb';
+import { type Db, ObjectId } from 'mongodb';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -153,6 +153,9 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     const actorEmail = user?.email ?? 'admin@conduit.localhost';
     const now = new Date();
 
+    const serverObjId = new ObjectId();
+    const serverId = serverObjId.toString();
+
     // Encrypt credential if provided
     let authDoc: McpServerDocument['auth'] = {
       type: data.auth.type,
@@ -161,7 +164,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
 
     if (data.auth.credential) {
       authDoc = crypto.encryptCredential(
-        data.slug,
+        serverId,
         data.auth.credential,
         data.auth.type === 'header' ? 'header' : 'bearer',
         data.auth.headerName,
@@ -169,6 +172,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     }
 
     const doc: McpServerDocument = {
+      _id: serverObjId,
       slug: data.slug,
       displayName: data.displayName,
       url: data.url,
@@ -192,8 +196,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
       updatedAt: now,
     };
 
-    const inserted = await db.collection<McpServerDocument>('mcp_servers').insertOne(doc);
-    const serverId = inserted.insertedId.toString();
+    await db.collection<McpServerDocument>('mcp_servers').insertOne(doc);
 
     // Bump configVersion atomically
     await db.collection<SystemStateDocument>('system_state').updateOne(
@@ -220,7 +223,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     });
 
     // Notify upstream manager immediately
-    await upstreamManager.upsertServerState({ ...doc, _id: inserted.insertedId });
+    await upstreamManager.upsertServerState(doc);
 
     reply.status(201).send({
       id: serverId,

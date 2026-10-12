@@ -38,6 +38,9 @@ describe('CredentialCrypto (AES-256-GCM)', () => {
     expect(() => {
       crypto.decryptCredential('srv_attacker_altered', encrypted);
     }).toThrow();
+
+    // Verify decryptCredential has exactly 2 parameters (serverId and auth) with no fallback AAD parameter
+    expect(crypto.decryptCredential.length).toBe(2);
   });
 
   it('fails decryption when ciphertext is tampered', () => {

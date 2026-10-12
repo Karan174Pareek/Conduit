@@ -55,7 +55,7 @@ export class UpstreamManager {
 
     let decryptedCredential = '';
     try {
-      decryptedCredential = this.crypto.decryptCredential(serverId, server.auth, server.slug);
+      decryptedCredential = this.crypto.decryptCredential(serverId, server.auth);
     } catch {
       // Credential decryption failure will surface as upstream_auth_failed when connecting
     }

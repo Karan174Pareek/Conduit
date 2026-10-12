@@ -6,6 +6,7 @@ describe('ToolRouter', () => {
   let mockDb: any;
   let mockUpstreamManager: any;
   let mockAuditSink: any;
+  let mockPolicyEngine: any;
   let router: ToolRouter;
 
   const adminPrincipal: Principal = {
@@ -29,6 +30,9 @@ describe('ToolRouter', () => {
       getServerState: vi.fn(),
       invokeTool: vi.fn(),
     };
+    mockPolicyEngine = {
+      evaluate: vi.fn().mockResolvedValue(true),
+    };
     mockAuditSink = {
       record: vi.fn().mockResolvedValue(undefined),
     };
@@ -36,7 +40,7 @@ describe('ToolRouter', () => {
     router = new ToolRouter(
       mockDb as unknown as Db,
       mockUpstreamManager,
-      undefined,
+      mockPolicyEngine,
       undefined,
       mockAuditSink,
     );
@@ -105,6 +109,20 @@ describe('ToolRouter', () => {
     await expect(router.call(memberPrincipal, 'woo__unapproved_tool', {})).rejects.toThrow('Unknown tool "woo__unapproved_tool"');
     expect(mockAuditSink.record).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: 'quarantined', exposedName: 'woo__unapproved_tool' }),
+    );
+
+    // 4. Policy-denied tool
+    mockPolicyEngine.evaluate.mockResolvedValueOnce(false);
+    mockDb.collection.mockReturnValue({
+      findOne: vi.fn().mockResolvedValue({
+        name: 'denied_tool',
+        exposedName: 'woo__denied_tool',
+        approval: { status: 'approved' },
+      }),
+    });
+    await expect(router.call(memberPrincipal, 'woo__denied_tool', {})).rejects.toThrow('Unknown tool "woo__denied_tool"');
+    expect(mockAuditSink.record).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'denied', exposedName: 'woo__denied_tool' }),
     );
   });
 
