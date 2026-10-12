@@ -107,3 +107,8 @@ deploy-local: build load
 e2e:
 	@echo "Running E2E tests..."
 	npm run test
+
+.PHONY: e2e-gateway
+e2e-gateway:
+	@echo "Running Gateway E2E Flow..."
+	npx tsx scripts/e2e/gateway-flow.ts

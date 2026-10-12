@@ -51,12 +51,13 @@ The canonical specifications and design documents live in [`docs/`](docs/):
 
 ---
 
-## Quickstart (Phase 0)
+## Quickstart & Verification
 
 1. **Install dependencies and run tests**:
    ```bash
    npm install
    npm run test
+   npm run typecheck
    ```
 
 2. **Generate local development secrets**:
@@ -69,14 +70,28 @@ The canonical specifications and design documents live in [`docs/`](docs/):
    make cluster-up
    ```
 
-4. **Verify throwaway ingress**:
+4. **Deploy all local components**:
    ```bash
-   curl http://whoami.localhost
+   make deploy-local
    ```
+
+5. **Run Phase 3 Gateway & Team Management E2E Verification**:
+   ```bash
+   make e2e-gateway
+   ```
+   This executes the complete end-to-end integration flow across:
+   - Admin bootstrap credential retrieval & login
+   - Member invite lifecycle (72h single-use token, Argon2id password hash)
+   - API key issuance (`mcpgw_...`)
+   - Stateless Streamable HTTP MCP front door invocation (`/mcp` tools/list and tools/call)
+   - Asynchronous bounded queue audit logging (`/api/audit`)
+   - CSV audit export with spreadsheet formula injection protection
+   - Immediate member deactivation & self-demote / last-active-admin protection
 
 ---
 
 ## Security & Hardening Exceptions
 
 - **WordPress Container User (Trivy DS-0002)**: The official WordPress (`wordpress:6.7.2-apache`) image starts as root to bind port 80 and setuid to `www-data` (UID 33). This is a documented exception (see [docs/SECURITY.md §7](docs/SECURITY.md#7-kubernetes-hardening-checklist)). Mitigations: drop all capabilities except the minimal required set (`CHOWN, FOWNER, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE`), enforce seccomp `RuntimeDefault`, disable `automountServiceAccountToken`, enforce default-deny `NetworkPolicy`, configure `readOnlyRootFilesystem: true` with isolated `tmpfs` mounts, and run within the `baseline` Pod Security Standard. Scoped ignore configured in `.trivyignore.yaml`.
+
 

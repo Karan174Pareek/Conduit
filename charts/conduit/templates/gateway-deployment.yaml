@@ -22,6 +22,7 @@ spec:
     spec:
       serviceAccountName: {{ include "conduit.fullname" . }}-gateway
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -45,6 +46,12 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sleep
+                  - "5"
           env:
             # Plain configuration from ConfigMap
             - name: PORT

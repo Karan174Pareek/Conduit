@@ -45,7 +45,13 @@ export interface AuditRecord {
   durationMs: number;
   outcome: 'success' | 'error' | 'timeout' | 'denied' | 'unreachable' | 'rate_limited' | 'invalid' | 'quarantined';
   errorMessage?: string;
+  errorCode?: string;
   upstreamIsError?: boolean;
+  args?: Record<string, unknown>;
+  resultBytes?: number;
+  requestId?: string;
+  userEmail?: string;
+  serverId?: string;
 }
 
 export interface AuditSink {
@@ -232,11 +238,16 @@ export class ToolRouter {
         { deadlineMs: ctx.deadlineMs },
       );
 
+      const resultBytes = result?.content ? JSON.stringify(result.content).length : 0;
+
       await this.auditSink.record({
         principal,
+        serverId,
         serverSlug: slug,
         toolName: catalogItem.name,
         exposedName,
+        args,
+        resultBytes,
         durationMs: Date.now() - startTime,
         outcome: result.isError ? 'error' : 'success',
         upstreamIsError: result.isError,
@@ -254,9 +265,11 @@ export class ToolRouter {
 
       await this.auditSink.record({
         principal,
+        serverId,
         serverSlug: slug,
         toolName: catalogItem.name,
         exposedName,
+        args,
         durationMs,
         outcome: errMsg.includes('timeout') ? 'timeout' : 'error',
         errorMessage: errMsg,
