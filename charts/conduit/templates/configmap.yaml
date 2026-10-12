@@ -6,6 +6,39 @@ metadata:
   labels:
     {{- include "conduit.labels" . | nindent 4 }}
 data:
+  PORT: "3000"
+  HOST: "0.0.0.0"
   PUBLIC_DASHBOARD_URL: "http://dashboard.{{ .Values.global.domain }}"
   PUBLIC_GATEWAY_URL: "http://gateway.{{ .Values.global.domain }}"
-  PUBLIC_PORT: "{{ .Values.global.publicPort }}"
+  ALLOWED_ORIGINS: "http://dashboard.{{ .Values.global.domain }}"
+  BOOTSTRAP_ADMIN_EMAIL: "admin@conduit.{{ .Values.global.domain }}"
+  LOG_LEVEL: "info"
+  ENABLE_DEBUG_ROUTES: "true"
+  GEMINI_MODEL: "gemini-2.5-flash"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "conduit.fullname" . }}-mongodb-init
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+data:
+  init-mongo.sh: |
+    #!/usr/bin/env bash
+    set -e
+    echo "Creating Conduit application user in MongoDB..."
+    mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin <<EOF
+    use ${MONGO_INITDB_DATABASE:-conduit};
+    if (!db.getUser("${MONGO_USER:-conduit}")) {
+      const uConfig = {
+        user: "${MONGO_USER:-conduit}",
+        roles: [{ role: "readWrite", db: "${MONGO_INITDB_DATABASE:-conduit}" }]
+      };
+      uConfig["p" + "wd"] = "${MONGO_PASSWORD}";
+      db.createUser(uConfig);
+      print("Conduit application user created successfully.");
+    } else {
+      print("Conduit application user already exists.");
+    }
+    EOF

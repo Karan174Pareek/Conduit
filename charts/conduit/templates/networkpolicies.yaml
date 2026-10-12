@@ -1,0 +1,122 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-default-deny
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-gateway
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow HTTP from Ingress controller (Traefik in kube-system)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    # Allow MongoDB to conduit-mongodb in the same namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "conduit.name" . }}-mongodb
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 27017
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow MCP requests to woo-mcp in store-default namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: store-default
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woocommerce-store-woo-mcp
+      ports:
+        - protocol: TCP
+          port: 3100
+    # Allow HTTPS egress to internet (Gemini API)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-mongodb
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "conduit.name" . }}-mongodb
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow MongoDB ONLY from the gateway pod
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 27017
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

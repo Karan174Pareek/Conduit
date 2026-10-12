@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: conduit-gateway
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: gateway
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: gateway
+    spec:
+      serviceAccountName: {{ include "conduit.fullname" . }}-gateway
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: "{{ .Values.images.repository }}/gateway:{{ .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Plain configuration from ConfigMap
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: PORT
+            - name: HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: HOST
+            - name: PUBLIC_DASHBOARD_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: PUBLIC_DASHBOARD_URL
+            - name: PUBLIC_GATEWAY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: PUBLIC_GATEWAY_URL
+            - name: ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: ALLOWED_ORIGINS
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: BOOTSTRAP_ADMIN_EMAIL
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: LOG_LEVEL
+            - name: ENABLE_DEBUG_ROUTES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: ENABLE_DEBUG_ROUTES
+            - name: GEMINI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "conduit.fullname" . }}-config
+                  key: GEMINI_MODEL
+            # Sensitive secrets from conduit-secrets Secret
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: MONGO_URI
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: SESSION_SECRET
+            - name: API_KEY_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: API_KEY_PEPPER
+            - name: CREDENTIAL_ENC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: CREDENTIAL_ENC_KEYS
+            - name: BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: BOOTSTRAP_ADMIN_PASSWORD
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.existingConduitSecret }}
+                  key: GEMINI_API_KEY
+                  optional: true
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 3000
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 3000
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
