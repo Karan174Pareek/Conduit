@@ -79,3 +79,39 @@ export function parseExposedToolName(
 
   return { slug, toolPart };
 }
+
+export interface ExposedToolMapping {
+  serverSlug: string;
+  upstreamToolName: string;
+  exposedName: string;
+}
+
+/**
+ * Manages bidirectional mappings between upstream tools and their exposed gateway names.
+ * Especially critical when upstream tool names exceed 64 chars and are truncated with hashes.
+ */
+export class ToolNameMapper {
+  private readonly exposedToOriginal = new Map<string, { serverSlug: string; upstreamToolName: string }>();
+
+  register(serverSlug: string, upstreamToolName: string): string {
+    const exposedName = formatExposedToolName(serverSlug, upstreamToolName);
+    this.exposedToOriginal.set(exposedName, { serverSlug, upstreamToolName });
+    return exposedName;
+  }
+
+  resolve(exposedName: string): { serverSlug: string; upstreamToolName: string } | null {
+    const exact = this.exposedToOriginal.get(exposedName);
+    if (exact) {
+      return exact;
+    }
+    const parsed = parseExposedToolName(exposedName);
+    if (!parsed) {
+      return null;
+    }
+    return { serverSlug: parsed.slug, upstreamToolName: parsed.toolPart };
+  }
+
+  clear(): void {
+    this.exposedToOriginal.clear();
+  }
+}
