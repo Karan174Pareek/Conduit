@@ -102,12 +102,16 @@ describe('WooStoreClient', () => {
     expect(capturedHeaders['Authorization']).toMatch(/^Basic /);
   });
 
-  it('caches checkReadiness response for 5 seconds', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => [{ id: 1 }],
-    } as any);
+  it('caches checkReadiness response for 5 seconds and calls lightweight route index', async () => {
+    let capturedUrl = '';
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ namespace: 'wc/v3' }),
+      };
+    });
 
     globalThis.fetch = fetchMock;
 
@@ -115,6 +119,7 @@ describe('WooStoreClient', () => {
     const r2 = await client.checkReadiness();
     expect(r1).toBe(true);
     expect(r2).toBe(true);
+    expect(capturedUrl).toBe('http://wordpress.local/wp-json/wc/v3/');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

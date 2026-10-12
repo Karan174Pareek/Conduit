@@ -167,8 +167,8 @@ export class WooStoreClient {
     }
 
     try {
-      // Fast check with lightweight query
-      await this.request('GET', 'products', { per_page: 1 });
+      // Fast lightweight route index probe (GET /wp-json/wc/v3/)
+      await this.request('GET', '');
       this.readyzCache = { ready: true, timestamp: now };
       return true;
     } catch {

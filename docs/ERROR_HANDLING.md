@@ -119,7 +119,7 @@ Deadline propagation: the router computes `deadline = min(callTimeout, remaining
 
 - Gateway starts even if upstreams are down (it just marks them `Unreachable`).
 - Gateway refuses to start (clear single-line error, non-zero exit) on: missing required secret, malformed `CREDENTIAL_ENC_KEYS`, schema version too low.
-- Helm ordering: Mongo → migration Job (pre-install/upgrade hook) → gateway → seed Job. Store: MariaDB → WordPress → setup Job (post-install hook) → woo-mcp readiness gates on the store being reachable.
+- Helm ordering: Mongo starts → gateway starts (runs forward-only migrations under a Mongo distributed lock, performs idempotent seeding, and keeps `/readyz` false until schema is ready). Store: MariaDB → WordPress → setup Job (post-install hook) → woo-mcp readiness gates on the store being reachable.
 - Setup Job: `backoffLimit: 6`, `activeDeadlineSeconds: 600`, every step idempotent (`wp core is-installed` checks, upsert of the consumer key), failures print the failing step and reason to the Job log; the Helm install uses `--atomic --timeout 10m` so a failed install rolls back cleanly.
 
 ## 9. Provisioner errors (bonus)
