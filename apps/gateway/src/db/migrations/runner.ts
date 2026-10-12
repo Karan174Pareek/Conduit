@@ -2,6 +2,7 @@ import type { Db } from 'mongodb';
 import { logger } from '../../logger.js';
 import * as m0001 from './0001_init.js';
 import * as m0002 from './0002_fix_tool_catalog_indexes.js';
+import * as m0003 from './0003_audit_and_team.js';
 
 export interface Migration {
   version: number;
@@ -9,9 +10,9 @@ export interface Migration {
   up: (db: Db) => Promise<void>;
 }
 
-export const MIGRATIONS: Migration[] = [m0001, m0002];
+export const MIGRATIONS: Migration[] = [m0001, m0002, m0003];
 
-export const TARGET_SCHEMA_VERSION = 2;
+export const TARGET_SCHEMA_VERSION = 3;
 
 export interface SystemStateDoc {
   _id: string;
