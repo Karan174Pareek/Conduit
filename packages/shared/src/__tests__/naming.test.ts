@@ -3,6 +3,7 @@ import {
   EXPOSED_TOOL_MAX_LENGTH,
   formatExposedToolName,
   parseExposedToolName,
+  ToolNameMapper,
   validateServerSlug,
 } from '../naming.js';
 import { exposedToolNameSchema, principalSchema, serverSlugSchema } from '../schemas.js';
@@ -75,5 +76,42 @@ describe('Server & Tool Naming Conventions', () => {
       source: 'mcp',
     };
     expect(principalSchema.safeParse(invalidPrincipal).success).toBe(false);
+  });
+
+  it('should ensure distinct hashes prevent collisions for long tools sharing identical prefix', () => {
+    const prefix = 'a'.repeat(60);
+    const toolA = `${prefix}_variant_alpha`;
+    const toolB = `${prefix}_variant_beta`;
+
+    const exposedA = formatExposedToolName('srv', toolA);
+    const exposedB = formatExposedToolName('srv', toolB);
+
+    expect(exposedA.length).toBeLessThanOrEqual(EXPOSED_TOOL_MAX_LENGTH);
+    expect(exposedB.length).toBeLessThanOrEqual(EXPOSED_TOOL_MAX_LENGTH);
+    expect(exposedA).not.toBe(exposedB);
+  });
+
+  it('should resolve reverse tool mapping correctly through ToolNameMapper', () => {
+    const mapper = new ToolNameMapper();
+
+    const shortTool = 'get_item';
+    const longTool = 'an_excessively_long_upstream_tool_name_designed_to_test_hash_truncation_mechanisms_in_conduit';
+
+    const exposedShort = mapper.register('woo', shortTool);
+    const exposedLong = mapper.register('woo', longTool);
+
+    expect(exposedShort).toBe('woo__get_item');
+    expect(exposedLong.length).toBe(EXPOSED_TOOL_MAX_LENGTH);
+
+    // Reverse lookup resolves original full upstream names accurately
+    const resolvedShort = mapper.resolve(exposedShort);
+    expect(resolvedShort).toEqual({ serverSlug: 'woo', upstreamToolName: shortTool });
+
+    const resolvedLong = mapper.resolve(exposedLong);
+    expect(resolvedLong).toEqual({ serverSlug: 'woo', upstreamToolName: longTool });
+
+    // Non-existent tool returns null
+    expect(mapper.resolve('woo__nonexistent')).toEqual({ serverSlug: 'woo', upstreamToolName: 'nonexistent' });
+    expect(mapper.resolve('invalid_format')).toBeNull();
   });
 });
