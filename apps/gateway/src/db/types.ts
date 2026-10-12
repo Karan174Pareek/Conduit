@@ -4,11 +4,15 @@ import type { Role } from '@conduit/shared';
 export interface UserDocument {
   _id: ObjectId;
   email: string;
+  name?: string;
   role: Role;
   passwordHash: string;
+  status?: 'invited' | 'active' | 'disabled';
   failedLoginAttempts?: number;
   lockedUntil?: Date | null;
   disabled?: boolean;
+  disabledAt?: Date | null;
+  lastLoginAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,6 +111,42 @@ export interface SystemStateDocument {
   configVersion?: number;
   version?: number;
   updatedAt?: Date;
+}
+
+export interface ToolCallDocument {
+  _id?: ObjectId;
+  ts: Date;
+  requestId: string;
+  userId: string;
+  userEmail: string;
+  role: Role;
+  via: 'apikey' | 'session';
+  keyId?: string | null;
+  source: 'mcp' | 'chat';
+  conversationId?: string | null;
+  serverId?: string;
+  serverSlug: string;
+  tool: string;
+  exposedName: string;
+  durationMs: number;
+  outcome: 'success' | 'error' | 'timeout' | 'denied' | 'unreachable' | 'rate_limited' | 'invalid' | 'quarantined';
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  argsSummary: string;
+  argsHash: string;
+  resultBytes?: number;
+  upstreamIsError?: boolean;
+}
+
+export interface InviteDocument {
+  _id?: ObjectId;
+  email: string;
+  role: Role;
+  tokenHash: string;
+  invitedBy: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
 }
 
 export function toObjectId(id: string): ObjectId | null {

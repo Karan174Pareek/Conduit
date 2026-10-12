@@ -9,17 +9,23 @@ import { authRoutes } from './routes/auth.js';
 import { keysRoutes } from './routes/keys.js';
 import { serverRoutes } from './routes/servers.js';
 import { mcpRoutes } from './routes/mcp.js';
+import { auditRoutes } from './routes/audit.js';
+import { inviteRoutes } from './routes/invites.js';
+import { userRoutes } from './routes/users.js';
 import { csrfProtection } from './middleware/csrf.js';
 import { CredentialCrypto } from './registry/crypto.js';
 import { CatalogService } from './catalog/service.js';
 import { UpstreamManager } from './upstream/manager.js';
 import { ToolRouter } from './router/tool-router.js';
+import { MongoAuditSink } from './audit/sink.js';
 
 export interface AppDependencies {
   crypto?: CredentialCrypto;
   catalogService?: CatalogService;
   upstreamManager?: UpstreamManager;
   toolRouter?: ToolRouter;
+  auditSink?: MongoAuditSink;
+  isReady?: () => boolean;
 }
 
 export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): FastifyInstance {
@@ -61,16 +67,18 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   const credCrypto = deps.crypto ?? new CredentialCrypto(encryptionKeys);
   const catalogService = deps.catalogService ?? new CatalogService(db, app.log);
   const upstreamManager = deps.upstreamManager ?? new UpstreamManager(db, credCrypto, catalogService, app.log);
-  const toolRouter = deps.toolRouter ?? new ToolRouter(db, upstreamManager, undefined, undefined, undefined, app.log);
+  const auditSink = deps.auditSink ?? new MongoAuditSink(db, app.log);
+  const toolRouter = deps.toolRouter ?? new ToolRouter(db, upstreamManager, undefined, undefined, auditSink, app.log);
 
   // Attach to fastify instance for testing / lifecycle management
   (app as any).upstreamManager = upstreamManager;
   (app as any).toolRouter = toolRouter;
   (app as any).catalogService = catalogService;
   (app as any).crypto = credCrypto;
+  (app as any).auditSink = auditSink;
 
   // Health and probe routes
-  app.register(healthRoutes(db));
+  app.register(healthRoutes(db, deps.isReady));
 
   // Core API routes
   app.register(authRoutes(db, config), { prefix: '/api/auth' });
@@ -83,6 +91,9 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
     upstreamManager,
     prefix: '/api',
   });
+  app.register(auditRoutes, { db, config, prefix: '/api' });
+  app.register(inviteRoutes, { db, config, prefix: '/api' });
+  app.register(userRoutes, { db, config, prefix: '/api' });
 
   // MCP front door
   app.register(mcpRoutes, { db, config, toolRouter });

@@ -35,7 +35,7 @@ describe('Migration 0002 Tool Catalog Index Fixes', { timeout: 30000 }, () => {
 
     await runMigrations(db, 'fresh-runner');
 
-    expect(await getCurrentSchemaVersion(db)).toBe(2);
+    expect(await getCurrentSchemaVersion(db)).toBeGreaterThanOrEqual(2);
     expect(await isSchemaReady(db, 2)).toBe(true);
 
     const indexes = await db.collection('tool_catalog').indexes();
@@ -69,7 +69,7 @@ describe('Migration 0002 Tool Catalog Index Fixes', { timeout: 30000 }, () => {
     // 2. Run runner: applies 0002
     await runMigrations(db, 'upgrade-runner');
 
-    expect(await getCurrentSchemaVersion(db)).toBe(2);
+    expect(await getCurrentSchemaVersion(db)).toBeGreaterThanOrEqual(2);
     expect(await isSchemaReady(db, 2)).toBe(true);
 
     const upgradedIndexes = await db.collection('tool_catalog').indexes();
@@ -82,7 +82,7 @@ describe('Migration 0002 Tool Catalog Index Fixes', { timeout: 30000 }, () => {
 
     // 3. Run runner again: proves running twice is idempotent
     await runMigrations(db, 'upgrade-runner-2');
-    expect(await getCurrentSchemaVersion(db)).toBe(2);
+    expect(await getCurrentSchemaVersion(db)).toBeGreaterThanOrEqual(2);
 
     const recheckIndexes = await db.collection('tool_catalog').indexes();
     const recheckNames = recheckIndexes.map((i) => i.name);

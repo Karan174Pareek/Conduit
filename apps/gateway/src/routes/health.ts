@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Db } from 'mongodb';
 import { isSchemaReady, getCurrentSchemaVersion } from '../db/migrations/runner.js';
 
-export const healthRoutes = (db: Db): FastifyPluginAsync => async (fastify) => {
+export const healthRoutes = (db: Db, isReady?: () => boolean): FastifyPluginAsync => async (fastify) => {
   // Liveness probe: event loop only
   fastify.get('/healthz', async (_req, reply) => {
     return reply.status(200).send({ status: 'ok' });
@@ -10,6 +10,12 @@ export const healthRoutes = (db: Db): FastifyPluginAsync => async (fastify) => {
 
   // Readiness probe: Mongo ping AND schema version ready (ignores upstreams!)
   fastify.get('/readyz', async (_req, reply) => {
+    if (isReady && !isReady()) {
+      return reply.status(503).send({
+        status: 'unready',
+        reason: 'Server is shutting down',
+      });
+    }
     let isMongoAlive = false;
     try {
       await db.command({ ping: 1 });

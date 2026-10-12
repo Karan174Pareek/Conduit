@@ -21,7 +21,8 @@ async function main() {
   // 2. Bootstrap initial admin if no admin exists
   await bootstrapAdmin(db, config);
 
-  const app = buildApp(config, db);
+  let isShuttingDown = false;
+  const app = buildApp(config, db, { isReady: () => !isShuttingDown });
 
   const upstreamManager = (app as any).upstreamManager as UpstreamManager;
   const crypto = (app as any).crypto as CredentialCrypto;
@@ -64,18 +65,24 @@ async function main() {
   }, 5000);
 
   // Graceful shutdown handling
-  let isShuttingDown = false;
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    logger.info({ signal }, 'Graceful shutdown initiated');
+    logger.info({ signal }, 'Graceful shutdown initiated; failing /readyz immediately');
 
     clearInterval(configConvergenceTimer);
     upstreamManager.stopBackgroundLoops();
 
     try {
       await app.close();
-      logger.info('Fastify server closed');
+      logger.info('Fastify server closed (in-flight drained)');
+
+      const auditSink = (app as any).auditSink;
+      if (auditSink) {
+        await auditSink.close();
+        logger.info('MongoAuditSink queue flushed and closed');
+      }
+
       await closeDatabase();
       logger.info('Database connections closed');
       process.exit(0);
