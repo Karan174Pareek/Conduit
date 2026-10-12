@@ -64,7 +64,7 @@ export class CredentialCrypto {
    * Uses the kid attached to the credential record.
    * Verifies AAD = serverId and auth tag.
    */
-  decryptCredential(serverId: string, auth: EncryptedAuthCredential): string {
+  decryptCredential(serverId: string, auth: EncryptedAuthCredential, fallbackAad?: string): string {
     if (!auth || auth.type === 'none' || !auth.ciphertext || !auth.iv || !auth.tag || !auth.kid) {
       return '';
     }
@@ -78,11 +78,26 @@ export class CredentialCrypto {
     const tag = Buffer.from(auth.tag, 'base64');
     const ciphertext = Buffer.from(auth.ciphertext, 'base64');
 
-    const decipher = createDecipheriv('aes-256-gcm', keyBuffer, iv);
-    decipher.setAAD(Buffer.from(serverId, 'utf-8'));
-    decipher.setAuthTag(tag);
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', keyBuffer, iv);
+      decipher.setAAD(Buffer.from(serverId, 'utf-8'));
+      decipher.setAuthTag(tag);
 
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return decrypted.toString('utf-8');
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return decrypted.toString('utf-8');
+    } catch (err: unknown) {
+      if (fallbackAad && fallbackAad !== serverId) {
+        try {
+          const decipherFallback = createDecipheriv('aes-256-gcm', keyBuffer, iv);
+          decipherFallback.setAAD(Buffer.from(fallbackAad, 'utf-8'));
+          decipherFallback.setAuthTag(tag);
+          const decrypted = Buffer.concat([decipherFallback.update(ciphertext), decipherFallback.final()]);
+          return decrypted.toString('utf-8');
+        } catch {
+          // Re-throw primary decipher error
+        }
+      }
+      throw err;
+    }
   }
 }

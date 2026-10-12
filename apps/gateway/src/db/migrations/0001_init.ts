@@ -26,6 +26,8 @@ export async function up(db: Db): Promise<void> {
 
   // 5. tool_catalog
   await db.createCollection('tool_catalog').catch(() => {});
+  await db.collection('tool_catalog').dropIndex('serverSlug_1_toolName_1').catch(() => {});
+  await db.collection('tool_catalog').dropIndex('approved_1').catch(() => {});
   await db.collection('tool_catalog').createIndex(
     { serverId: 1, name: 1 },
     { unique: true },

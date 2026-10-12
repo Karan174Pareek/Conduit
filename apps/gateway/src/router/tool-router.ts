@@ -97,7 +97,7 @@ export class ToolRouter {
   async list(principal: Principal): Promise<ExposedToolDefinition[]> {
     const activeServers = this.upstreamManager
       .getAllServerStates()
-      .filter((s) => s.server.enabled && s.breaker.phase !== 'open');
+      .filter((s) => s.server.enabled && s.breaker.phase !== 'open' && s.server.status?.state === 'connected');
 
     const result: ExposedToolDefinition[] = [];
 

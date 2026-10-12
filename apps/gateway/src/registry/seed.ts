@@ -58,10 +58,11 @@ export async function seedDefaultServers(
   }
 
   // If already exists, verify if URL or token changed
+  const existingId = existing._id?.toString() ?? 'woo';
   let tokenChanged = false;
   if (rawToken) {
     try {
-      const currentToken = crypto.decryptCredential('woo', existing.auth);
+      const currentToken = crypto.decryptCredential(existingId, existing.auth, 'woo');
       if (currentToken !== rawToken) {
         tokenChanged = true;
       }
@@ -83,7 +84,7 @@ export async function seedDefaultServers(
     }
 
     if (tokenChanged && rawToken) {
-      updateFields.auth = crypto.encryptCredential('woo', rawToken, 'bearer');
+      updateFields.auth = crypto.encryptCredential(existingId, rawToken, 'bearer');
     }
 
     await collection.updateOne({ slug: 'woo' }, { $set: updateFields });

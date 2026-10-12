@@ -55,7 +55,7 @@ export class UpstreamManager {
 
     let decryptedCredential = '';
     try {
-      decryptedCredential = this.crypto.decryptCredential(serverId, server.auth);
+      decryptedCredential = this.crypto.decryptCredential(serverId, server.auth, server.slug);
     } catch {
       // Credential decryption failure will surface as upstream_auth_failed when connecting
     }
@@ -119,6 +119,9 @@ export class UpstreamManager {
    */
   startBackgroundLoops(): void {
     if (this.healthIntervalTimer) return;
+
+    // Immediately run initial health check and catalog refresh on startup
+    void this.runHealthLoop().then(() => void this.runCatalogRefreshLoop());
 
     // Health check loop every 15s with jitter
     this.healthIntervalTimer = setInterval(() => {
@@ -301,12 +304,22 @@ export class UpstreamManager {
 
       try {
         const client = await this.getOrCreateClient(state);
-        const pingPromise = client.ping();
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          const t = setTimeout(() => reject(new Error('Ping timeout')), PING_TIMEOUT_MS);
-          t.unref?.();
-        });
-        await Promise.race([pingPromise, timeoutPromise]);
+        try {
+          const pingPromise = client.ping();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            const t = setTimeout(() => reject(new Error('Ping timeout')), PING_TIMEOUT_MS);
+            t.unref?.();
+          });
+          await Promise.race([pingPromise, timeoutPromise]);
+        } catch (pingErr: unknown) {
+          const errMsg = pingErr instanceof Error ? pingErr.message : String(pingErr);
+          // If server does not implement ping (Method not found / code -32601), fall back to listTools
+          if (errMsg.includes('Method not found') || (pingErr as { code?: number })?.code === -32601) {
+            await client.listTools();
+          } else {
+            throw pingErr;
+          }
+        }
 
         this.recordBreakerSuccess(state);
         state.lastSuccessAt = new Date();
@@ -322,22 +335,29 @@ export class UpstreamManager {
   }
 
   /**
+   * Refreshes tool catalog for a single upstream server.
+   */
+  async refreshServerCatalog(state: UpstreamServerState): Promise<void> {
+    if (!state.server.enabled || state.breaker.phase === 'open') return;
+
+    try {
+      const client = await this.getOrCreateClient(state);
+      const toolsResult = await client.listTools();
+      await this.catalogService.reconcileTools(state.server, toolsResult.tools);
+    } catch (err: unknown) {
+      this.logger?.debug(
+        { serverSlug: state.server.slug, error: err instanceof Error ? err.message : String(err) },
+        'Catalog refresh failed',
+      );
+    }
+  }
+
+  /**
    * Catalog refresh loop.
    */
   async runCatalogRefreshLoop(): Promise<void> {
     for (const state of this.statesBySlug.values()) {
-      if (!state.server.enabled || state.breaker.phase === 'open') continue;
-
-      try {
-        const client = await this.getOrCreateClient(state);
-        const toolsResult = await client.listTools();
-        await this.catalogService.reconcileTools(state.server, toolsResult.tools);
-      } catch (err: unknown) {
-        this.logger?.debug(
-          { serverSlug: state.server.slug, error: err instanceof Error ? err.message : String(err) },
-          'Background catalog refresh failed',
-        );
-      }
+      await this.refreshServerCatalog(state);
     }
   }
 
@@ -377,11 +397,15 @@ export class UpstreamManager {
   }
 
   private recordBreakerSuccess(state: UpstreamServerState): void {
+    const wasBroken = state.breaker.phase !== 'closed';
     state.breaker.phase = 'closed';
     state.breaker.consecutiveFailures = 0;
     state.breaker.openedAt = null;
     state.breaker.currentBackoffMs = 10000;
     state.breaker.halfOpenProbeInFlight = false;
+    if (wasBroken) {
+      void this.refreshServerCatalog(state);
+    }
   }
 
   private recordBreakerFailure(state: UpstreamServerState, code: string, rawMessage: string): void {
@@ -448,18 +472,21 @@ export class UpstreamManager {
     const serverId = state.server._id;
     if (!serverId) return;
 
+    const statusObj = {
+      state: statusState,
+      reasonCode,
+      reason,
+      checkedAt: new Date(),
+      lastSuccessAt: state.lastSuccessAt,
+    };
+    state.server.status = statusObj;
+
     try {
       await this.db.collection('mcp_servers').updateOne(
         { _id: serverId },
         {
           $set: {
-            status: {
-              state: statusState,
-              reasonCode,
-              reason,
-              checkedAt: new Date(),
-              lastSuccessAt: state.lastSuccessAt,
-            },
+            status: statusObj,
           },
         },
       );

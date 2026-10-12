@@ -49,6 +49,7 @@ describe('ToolRouter', () => {
           slug: 'woo',
           displayName: 'WooCommerce',
           enabled: true,
+          status: { state: 'connected' },
         },
         breaker: { phase: 'closed' },
       },
