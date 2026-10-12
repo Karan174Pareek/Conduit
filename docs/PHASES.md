@@ -83,14 +83,14 @@ Exit tests
 **Goal:** the MCP front door and the machinery behind it, tested without a UI.
 
 Tasks (in this order)
-1. Config, logging (pino + redaction), Mongo connection, migrations runner, `/healthz` `/readyz`.
+1. Config, logging (pino + redaction), Mongo connection, in-process migrations runner under Mongo lock, idempotent seeding, `/healthz` `/readyz`.
 2. Users, bootstrap admin, sessions (minimal), API keys (generate, hash, verify, revoke).
-3. Registry CRUD + encryption + `configVersion` + seed Job for `woo` (trusted).
+3. Registry CRUD + encryption + `configVersion` + startup seeding for `woo` (trusted).
 4. `UpstreamManager`: connect, health loop, breaker, bulkhead, catalog cache, timeouts, result cap. Test against fake upstreams (slow, hung, garbage, flapping).
 5. Naming and `ToolRouter` (list/call), pinning (trusted auto-approve), error mapping.
 6. MCP front door (`POST /mcp`, stateless), authenticator, Origin check.
 7. Audit queue and `tool_calls` writes; `GET /audit`.
-8. Chart `conduit`: gateway Deployment/Service/Ingress, Mongo StatefulSet, migration Job, seed Job, NetworkPolicies, Secrets by reference.
+8. Chart `conduit`: gateway Deployment/Service/Ingress, Mongo StatefulSet, NetworkPolicies, Secrets by reference (no hook migration/seed jobs needed).
 
 Exit tests
 - MCP Inspector with `Authorization: Bearer` key sees `woo__*` tools and calls `woo__list_orders`.

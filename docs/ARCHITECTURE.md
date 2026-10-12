@@ -288,8 +288,7 @@ charts/conduit/
   Chart.yaml  values.yaml
   templates/ _helpers.tpl gateway-{deployment,service,hpa,pdb,sa}.yaml
              dashboard-*.yaml  mongodb-statefulset.yaml  demo-mcps.yaml (range)
-             ingress.yaml  networkpolicies.yaml  migrations-job.yaml (pre-upgrade hook)
-             seed-job.yaml (registers first-party servers; idempotent)  servicemonitor.yaml (optional)
+             ingress.yaml  networkpolicies.yaml  servicemonitor.yaml (optional)
 charts/woocommerce-store/
   templates/ wordpress-*.yaml mariadb-*.yaml woo-mcp-*.yaml setup-job.yaml
              ingress.yaml networkpolicies.yaml quota-limitrange.yaml (bonus, behind flag)
@@ -344,7 +343,7 @@ All under `/api`, JSON, session cookie + `x-csrf-token` on mutations, `x-request
 ## 13. Scaling, upgrade, rollback
 
 - **Scaling**: gateway is stateless; run 2+ replicas behind the Service. Each replica holds its own upstream clients. Rate limiting is per replica unless `REDIS_URL` is set (then shared). Demonstrate with two replicas by killing one while a client keeps calling.
-- **Upgrade**: `helm upgrade --install --atomic --timeout 10m -f values-prod.yaml`. Pre-upgrade hook Job runs MongoDB migrations (expand/contract; the old version must keep working with the new schema so rollback is safe). WordPress image bump triggers the post-upgrade setup Job (`wp core update-db`).
+- **Upgrade**: `helm upgrade --install --atomic --timeout 10m -f values-prod.yaml`. The gateway runs forward-only migrations at startup under a Mongo-based distributed lock (so multiple replicas are safe); `/readyz` stays false until schema reaches the required version (expand/contract; the old version must keep working with the new schema so rollback is safe). WordPress image bump triggers the post-upgrade setup Job (`wp core update-db`).
 - **Rollback**: `helm history`, `helm rollback <rev> --wait`; migrations are additive so no data rollback is needed; PVCs are kept.
 - **Graceful shutdown**: `preStop` sleep 5 s, `terminationGracePeriodSeconds: 60`, SIGTERM stops accepting new requests, drains in-flight calls (max 30 s), closes upstream clients, flushes the audit queue.
 - `PodDisruptionBudget` (`minAvailable: 1`) for gateway and dashboard in prod.

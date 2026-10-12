@@ -203,10 +203,11 @@ failed -> (retry) provisioning        failed -> deleting -> deleted
 
 ## 4. Migrations
 
-- A tiny versioned runner (`migrations/0001_init.ts`, ...) executed by a Helm **pre-install/pre-upgrade hook Job** using the gateway image (`node dist/migrate.js`). Records the version in `system_state.schema`.
+- The gateway runs forward-only migrations at startup (`migrations/0001_init.ts`, ...) under a MongoDB-based distributed lock in `system_state` (ensuring multiple replicas are safe). Records the applied schema version in `system_state.schema`.
+- `/readyz` stays false (503) until the schema is at the required version, preventing traffic routing before migration completes.
 - Rule: **expand then contract.** A release may add collections, fields and indexes; removing or renaming happens one release later. This keeps `helm rollback` safe.
-- The gateway refuses to start if `schema.version` is lower than the minimum it requires (clear error, not a crash loop of random failures).
-- Index creation uses `background` builds and `createIndex` is idempotent.
+- The gateway refuses to mark `/readyz` healthy and logs a clear error if `schema.version` is lower than the minimum it requires.
+- Index creation uses `createIndex` which is idempotent.
 
 ## 5. Retention, backup, restore
 
@@ -221,10 +222,10 @@ failed -> (retry) provisioning        failed -> deleting -> deleted
 
 ## 6. Seeding (idempotent)
 
-A post-install Job (or gateway start-up task) upserts:
+Seeding is performed directly by the gateway at startup with idempotent upserts under startup lock:
 - bootstrap admin (only if no admin exists);
 - first-party servers `woo`, `notes`, `utils` with `trusted: true`, `system: true`, `origin: seed`; credentials come from Secrets, never from values files.
-Re-running changes nothing unless the Secret or URL changed.
+Re-running changes nothing unless the Secret or URL changed. No separate post-install hook Job is required.
 
 ## 7. Performance notes
 
