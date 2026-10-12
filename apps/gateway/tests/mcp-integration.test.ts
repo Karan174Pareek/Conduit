@@ -20,10 +20,11 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
   let serverBetaUrl: string;
   let _serverHungUrl: string;
 
-  const mongoUri =
+  const rawMongoUri =
     process.env['TEST_MONGO_URI'] ||
     process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test_3b?authSource=admin';
+    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
+  const mongoUri = rawMongoUri.replace(/\/([^/?]+)(\?|$)/, '/conduit_test_3b$2');
 
   const testConfig: Config = {
     PORT: 0,
@@ -131,7 +132,7 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
   beforeAll(async () => {
     mongoClient = new MongoClient(mongoUri);
     await mongoClient.connect();
-    db = mongoClient.db();
+    db = mongoClient.db('conduit_test_3b');
     await db.dropDatabase();
 
     // 1. Mock Server Alpha (exposes ping and search)
