@@ -14,7 +14,6 @@ describe('Gateway Config Validation', () => {
     PUBLIC_DASHBOARD_URL: 'http://dashboard.localhost',
     PUBLIC_GATEWAY_URL: 'http://gateway.localhost',
     ALLOWED_ORIGINS: 'http://dashboard.localhost',
-    ENABLE_DEBUG_ROUTES: 'true',
     LOG_LEVEL: 'info',
   };
 
@@ -23,7 +22,6 @@ describe('Gateway Config Validation', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.PORT).toBe(3000);
-      expect(result.data.ENABLE_DEBUG_ROUTES).toBe(true);
       expect(result.data.BOOTSTRAP_ADMIN_EMAIL).toBe('admin@conduit.localhost');
     }
   });

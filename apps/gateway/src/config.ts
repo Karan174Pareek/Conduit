@@ -35,12 +35,11 @@ export const configSchema = z.object({
   PUBLIC_DASHBOARD_URL: z.string().default('http://dashboard.localhost'),
   PUBLIC_GATEWAY_URL: z.string().default('http://gateway.localhost'),
   ALLOWED_ORIGINS: z.string().default('http://dashboard.localhost'),
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-  ENABLE_DEBUG_ROUTES: z
+  WOO_MCP_URL: z
     .string()
-    .optional()
-    .default('false')
-    .transform((val) => val === 'true'),
+    .default('http://store-woocommerce-store-woo-mcp.store-default.svc.cluster.local:3100/mcp'),
+  WOO_MCP_BEARER_TOKEN: z.string().optional().default(''),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });
 
 export type Config = z.infer<typeof configSchema>;
