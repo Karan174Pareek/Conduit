@@ -365,14 +365,20 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
     const principal = { userId: 'usr_1', role: 'member' as const, via: 'apikey' as const };
     const listedTools = await router.list(principal);
 
-    // Both servers appear with distinct prefixes
+    // Both servers appear with distinct prefixes for ping and search
     const alphaPing = listedTools.find((t) => t.name === 'alpha__ping');
     const betaPing = listedTools.find((t) => t.name === 'beta__ping');
+    const alphaSearch = listedTools.find((t) => t.name === 'alpha__search');
+    const betaSearch = listedTools.find((t) => t.name === 'beta__search');
 
     expect(alphaPing).toBeDefined();
     expect(betaPing).toBeDefined();
+    expect(alphaSearch).toBeDefined();
+    expect(betaSearch).toBeDefined();
     expect(alphaPing?.description).toContain('[Alpha Service]');
     expect(betaPing?.description).toContain('[Beta Service]');
+    expect(alphaSearch?.description).toContain('[Alpha Service]');
+    expect(betaSearch?.description).toContain('[Beta Service]');
 
     // Routing calls to each routes to the respective server
     const resAlpha = await router.call(principal, 'alpha__ping', {});
@@ -380,6 +386,38 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
 
     const resBeta = await router.call(principal, 'beta__ping', {});
     expect(resBeta.content[0]?.text).toBe('beta:ping');
+
+    const resAlphaSearch = await router.call(principal, 'alpha__search', {});
+    expect(resAlphaSearch.content[0]?.text).toBe('alpha:search');
+
+    const resBetaSearch = await router.call(principal, 'beta__search', {});
+    expect(resBetaSearch.content[0]?.text).toBe('beta:search');
+
+    // Add hung upstream to prove it does not delay calls or listing of active servers
+    await db.collection<McpServerDocument>('mcp_servers').insertOne({
+      slug: 'hung-srv',
+      displayName: 'Hung Service',
+      url: _serverHungUrl,
+      enabled: true,
+      trusted: true,
+      system: false,
+      origin: 'admin',
+      auth: { type: 'none' },
+      callTimeoutMs: 5000,
+      maxConcurrent: 8,
+      approveOnAdd: true,
+      status: { state: 'connected', reasonCode: null, reason: null, checkedAt: null, lastSuccessAt: null },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await mgr.loadServers();
+
+    // Dead or hung upstream does not delay calls to other servers (timing assertion < 100ms)
+    const startCall = Date.now();
+    const immediateCall = await router.call(principal, 'alpha__ping', {});
+    const callElapsed = Date.now() - startCall;
+    expect(immediateCall.content[0]?.text).toBe('alpha:ping');
+    expect(callElapsed).toBeLessThan(100);
 
     // Dead upstream does not delay calls or listing of alpha and beta
     const startListing = Date.now();

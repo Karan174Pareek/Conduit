@@ -313,11 +313,15 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     );
 
     // Record admin event
+    const action = data.enabled !== undefined
+      ? (data.enabled ? 'server.enable' : 'server.disable')
+      : 'server.update';
+
     await db.collection<AdminEventDocument>('admin_events').insertOne({
       ts: now,
       actorId: principal.userId,
       actorEmail,
-      action: 'server.update',
+      action,
       target: { type: 'server', id: server._id?.toString() ?? server.slug, label: server.slug },
       details: {
         updatedFields: Object.keys(updateFields).filter((k) => k !== 'auth'),

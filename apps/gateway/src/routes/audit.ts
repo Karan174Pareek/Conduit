@@ -178,7 +178,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (
   });
 
   // 3. GET /api/admin-events - Admin activity audit log
-  fastify.get('/admin-events', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  fastify.get('/admin-events', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (request, reply) => {
     const query = adminEventsQuerySchema.parse(request.query);
     const filter: Filter<AdminEventDocument> = {};
 
@@ -215,7 +215,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (
   });
 
   // 4. GET /api/stats/servers - Aggregated server call metrics over the last 24h
-  fastify.get('/stats/servers', { preHandler: [requireAuth(db, config)] }, async (_request, reply) => {
+  fastify.get('/stats/servers', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (_request, reply) => {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const pipeline = [
