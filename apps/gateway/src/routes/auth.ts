@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import { toObjectId, type UserDocument, type AdminEventDocument, type SessionDocument } from '../db/types.js';
 import { verifyPassword, verifyDummy } from '../services/password.js';
-import { createSession, destroySession } from '../services/sessions.js';
+import { createSession, destroySession, hashSessionToken } from '../services/sessions.js';
 import { requireAuth } from '../middleware/authenticator.js';
 
 const loginSchema = z.object({
@@ -159,11 +159,16 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
     }
 
     let csrfToken: string | undefined;
-    const sessionId = req.cookies?.['session_id'];
-    if (sessionId) {
-      const session = await db.collection<SessionDocument>('sessions').findOne({ sessionId });
-      if (session) {
-        csrfToken = session.csrfToken;
+    if (req.sessionDoc?.csrfToken) {
+      csrfToken = req.sessionDoc.csrfToken;
+    } else {
+      const sessionId = req.cookies?.['session_id'];
+      if (sessionId) {
+        const tokenHash = hashSessionToken(sessionId);
+        const session = await db.collection<SessionDocument>('sessions').findOne({ tokenHash });
+        if (session) {
+          csrfToken = session.csrfToken;
+        }
       }
     }
 
