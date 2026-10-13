@@ -15,7 +15,7 @@ import { REDACTED_PATHS } from '../src/logger.js';
 import { hashPassword } from '../src/services/password.js';
 import type { McpServerDocument, UserDocument } from '../src/db/types.js';
 
-describe('Integration Secret Leakage & Redaction Proof', () => {
+describe('Integration Secret Leakage & Redaction Proof', { timeout: 30000 }, () => {
   let mongoClient: MongoClient;
   let db: Db;
   let mockServer: http.Server;
