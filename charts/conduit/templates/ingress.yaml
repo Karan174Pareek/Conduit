@@ -24,7 +24,21 @@ spec:
     - host: "gateway.{{ .Values.global.domain }}"
       http:
         paths:
-          - path: /
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: conduit-gateway
+                port:
+                  number: 3000
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: conduit-gateway
+                port:
+                  number: 3000
+          - path: /readyz
             pathType: Prefix
             backend:
               service:
