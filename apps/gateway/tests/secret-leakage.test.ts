@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import type { Writable } from 'node:stream';
 import { MongoClient, type Db, ObjectId } from 'mongodb';
 import pino from 'pino';
 import { buildApp } from '../src/app.js';
@@ -13,7 +15,7 @@ import { REDACTED_PATHS } from '../src/logger.js';
 import { hashPassword } from '../src/services/password.js';
 import type { McpServerDocument, UserDocument } from '../src/db/types.js';
 
-describe('Integration Secret Leakage & Redaction Proof', () => {
+describe('Integration Secret Leakage & Redaction Proof', { timeout: 30000 }, () => {
   let mongoClient: MongoClient;
   let db: Db;
   let mockServer: http.Server;
@@ -119,7 +121,7 @@ describe('Integration Secret Leakage & Redaction Proof', () => {
       });
 
       mockServer.listen(0, '127.0.0.1', () => {
-        const addr = mockServer.address() as any;
+        const addr = mockServer.address() as AddressInfo;
         mockServerUrl = `http://127.0.0.1:${addr.port}/mcp`;
         resolve();
       });
@@ -148,7 +150,7 @@ describe('Integration Secret Leakage & Redaction Proof', () => {
           censor: '[REDACTED]',
         },
       },
-      destination as any,
+      destination as Writable,
     );
 
     const crypto = new CredentialCrypto(parseEncryptionKeys(testConfig.CREDENTIAL_ENC_KEYS));

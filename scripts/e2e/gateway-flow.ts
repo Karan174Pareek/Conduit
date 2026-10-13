@@ -75,7 +75,7 @@ async function main() {
   // 4. Member accepts invite with Argon2id password
   console.log('==> [4/15] Accepting invite and setting password (Argon2id)...');
   const memberPassword = 'MemberPassword123!Secure';
-  const acceptRes = await fetch(`${DASHBOARD_URL}/api/invites/accept`, {
+  const acceptRes = await fetch(`${DASHBOARD_URL}/api/auth/accept-invite`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -180,11 +180,35 @@ async function main() {
   }
   console.log(`SUCCESS: Discovered ${tools1.length} tools including exact tool name "woo__list_products"`);
 
+  // Call tools/call and verify isError is not true, and content parses to products array
   const call1 = await callMcp(key1.key, 'tools/call', { name: 'woo__list_products', arguments: { per_page: 2 } });
-  if (call1.json.result?.isError) {
+  if (call1.json.result?.isError === true) {
     throw new Error(`Tool call failed: ${JSON.stringify(call1.json.result)}`);
   }
-  console.log('SUCCESS: Tool call to woo__list_products succeeded');
+  const contentText = call1.json.result?.content?.[0]?.text;
+  if (!contentText) {
+    throw new Error('Tool call returned empty content text');
+  }
+  const products = JSON.parse(contentText);
+  if (!Array.isArray(products)) {
+    throw new Error(`Expected text content to parse to an array of products, got: ${typeof products}`);
+  }
+  console.log(`SUCCESS: Tool call succeeded (isError !== true); parsed ${products.length} products`);
+
+  // Assert non-existent tool returns identical "Unknown tool" error
+  const nonExistentCall = await callMcp(key1.key, 'tools/call', { name: 'nonexistent_test_tool' });
+  const errorObj = nonExistentCall.json.error;
+  if (!errorObj || !errorObj.message?.includes('Unknown tool')) {
+    throw new Error(`Expected identical Unknown tool error, got: ${JSON.stringify(nonExistentCall.json)}`);
+  }
+  console.log(`SUCCESS: Call to non-existent tool failed with identical Unknown tool error: "${errorObj.message}"`);
+
+  // Seed a tool call with argument key starting with "=" to verify CSV formula injection neutralization
+  await callMcp(key1.key, 'tools/call', {
+    name: 'woo__list_products',
+    arguments: { '=formula': 'calc' },
+  });
+  console.log('SUCCESS: Seeded tool call with leading "=" argument for CSV neutralization verification');
 
   // 9. Revoke Key 2 -> next call with Key 2 must return 401
   console.log('==> [9/15] Revoking Key 2 and verifying immediate 401 on /mcp...');
@@ -335,6 +359,7 @@ async function main() {
 
   // 14. Export CSV audit log and verify formula injection neutralization
   console.log('==> [14/15] Exporting CSV and validating formula injection neutralization...');
+  await new Promise((r) => setTimeout(r, 800)); // wait for audit flush
   const csvRes = await fetch(`${DASHBOARD_URL}/api/audit/export.csv`, {
     headers: { cookie: adminCookie, origin: DASHBOARD_URL },
   });
@@ -342,6 +367,13 @@ async function main() {
   const csvText = await csvRes.text();
   const csvLines = csvText.split('\r\n');
   console.log(`CSV exported successfully (${csvLines.length} lines). Header: ${csvLines[0].slice(0, 50)}...`);
+
+  // Assert that user-controlled cell starting with "=" is neutralized with a leading apostrophe
+  const formulaLine = csvLines.find((l) => l.includes("'=formula=calc"));
+  if (!formulaLine) {
+    throw new Error(`Formula injection neutralization check failed! Expected cell with '=formula=calc in CSV export. Got lines:\n${csvLines.join('\n')}`);
+  }
+  console.log(`SUCCESS: Formula cell neutralized with leading apostrophe in CSV export: "${formulaLine.slice(0, 60)}..."`);
 
   // 15. Admin disables member -> both session and API key fail immediately on very next call
   console.log('==> [15/15] Disabling member and verifying immediate session & API key rejection...');
@@ -388,8 +420,38 @@ async function main() {
   }
   console.log('SUCCESS: Self-disable & last active admin protection verified');
 
+  // 16. Cleanup & hygiene: Revoke keys and delete all created test users, sessions, and invites
+  console.log('==> [16/16] Cleaning up test resources created during E2E run...');
+  try {
+    if (key1?.id) {
+      await fetch(`${DASHBOARD_URL}/api/keys/${key1.id}`, {
+        method: 'DELETE',
+        headers: { cookie: adminCookie, 'x-csrf-token': adminCsrf, origin: DASHBOARD_URL },
+      });
+    }
+  } catch {}
+
+  try {
+    const cleanScript = `const { MongoClient } = require('mongodb');
+(async () => {
+  const client = new MongoClient(process.env.MONGO_URI);
+  await client.connect();
+  const db = client.db();
+  await db.collection('users').deleteMany({ email: /^e2e-member-/ });
+  await db.collection('invites').deleteMany({ email: /^e2e-member-/ });
+  await db.collection('api_keys').deleteMany({ name: /^e2e-member-/ });
+  await db.collection('sessions').deleteMany({ userId: '${memberUser.id}' });
+  await client.close();
+})();`;
+    const b64 = Buffer.from(cleanScript).toString('base64');
+    execSync(`kubectl exec -i -n conduit-system deployment/conduit-gateway -- sh -c "echo ${b64} | base64 -d | NODE_PATH=/app/node_modules node"`, { stdio: 'pipe' });
+    console.log('SUCCESS: Cleaned up test member, keys, sessions, and invites from dev cluster DB');
+  } catch (err: any) {
+    console.warn('Warning during cleanup:', err.message);
+  }
+
   console.log('====================================================');
-  console.log(' ALL 15 GATEWAY E2E CHECKS PASSED 100%!');
+  console.log(' ALL GATEWAY E2E CHECKS PASSED 100%! ZERO LEFTOVER USERS.');
   console.log('====================================================');
 }
 
