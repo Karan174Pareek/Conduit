@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import { createApiKey, listApiKeys, revokeApiKey, MAX_KEYS_PER_USER } from '../services/api-keys.js';
 import { requireAuth } from '../middleware/authenticator.js';
-import { toObjectId, type ApiKeyDocument } from '../db/types.js';
+import { toObjectId, type ApiKeyDocument, type AdminEventDocument } from '../db/types.js';
 
 const createKeySchema = z.object({
   name: z.string().min(1, 'Key name is required').max(100, 'Key name is too long'),
@@ -37,6 +37,17 @@ export const keysRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
         name,
         expDate,
       );
+
+      await db.collection<AdminEventDocument>('admin_events').insertOne({
+        ts: new Date(),
+        actorId: principal.userId,
+        actorEmail: (req as any).user?.email ?? principal.userId,
+        action: 'key.issue',
+        target: { type: 'key', id: createdKey.id, label: name },
+        details: { keyId: createdKey.id, name, prefix: createdKey.prefix },
+        requestId: req.id,
+        ip: req.ip,
+      });
 
       return reply.status(201).send(createdKey);
     } catch (err: unknown) {
@@ -93,6 +104,18 @@ export const keysRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
     }
 
     await revokeApiKey(db, id, principal.userId, isAdmin);
+
+    await db.collection<AdminEventDocument>('admin_events').insertOne({
+      ts: new Date(),
+      actorId: principal.userId,
+      actorEmail: (req as any).user?.email ?? principal.userId,
+      action: 'key.revoke',
+      target: { type: 'key', id, label: keyDoc.name },
+      details: { keyId: id, prefix: keyDoc.prefix },
+      requestId: req.id,
+      ip: req.ip,
+    });
+
     return reply.status(200).send({ ok: true });
   });
 };

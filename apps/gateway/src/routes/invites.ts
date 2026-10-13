@@ -99,8 +99,8 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     });
   });
 
-  // 2. POST /api/invites/accept - Single-use acceptance with Argon2id password hashing
-  fastify.post('/invites/accept', async (request, reply) => {
+  // 2. POST /api/invites/accept and /api/auth/accept-invite
+  const acceptHandler = async (request: any, reply: any) => {
     const body = acceptInviteSchema.parse(request.body);
     const tokenHash = crypto.createHash('sha256').update(body.token).digest('hex');
 
@@ -130,7 +130,7 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     if (updateResult.modifiedCount === 0) {
       reply.status(400).send({
         error: 'Bad Request',
-        message: 'Invite token has already been used',
+        message: 'Invalid or expired invite token',
       });
       return;
     }
@@ -170,5 +170,8 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
       message: 'Invite accepted successfully',
       email: invite.email,
     });
-  });
+  };
+
+  fastify.post('/invites/accept', acceptHandler);
+  fastify.post('/auth/accept-invite', acceptHandler);
 };

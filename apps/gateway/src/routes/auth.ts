@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Db } from 'mongodb';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { toObjectId, type UserDocument } from '../db/types.js';
+import { toObjectId, type UserDocument, type AdminEventDocument, type SessionDocument } from '../db/types.js';
 import { verifyPassword, verifyDummy } from '../services/password.js';
 import { createSession, destroySession } from '../services/sessions.js';
 import { requireAuth } from '../middleware/authenticator.js';
@@ -62,6 +62,30 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
         { _id: user._id },
         { $set: updateData },
       );
+
+      await db.collection<AdminEventDocument>('admin_events').insertOne({
+        ts: now,
+        actorId: user._id.toString(),
+        actorEmail: user.email,
+        action: 'login.fail',
+        target: { type: 'user', id: user._id.toString(), label: user.email },
+        details: { email: user.email, attempts, reason: 'invalid_credentials' },
+        requestId: req.id,
+        ip: req.ip,
+      });
+
+      if (attempts >= 10) {
+        await db.collection<AdminEventDocument>('admin_events').insertOne({
+          ts: now,
+          actorId: user._id.toString(),
+          actorEmail: user.email,
+          action: 'login.lockout',
+          target: { type: 'user', id: user._id.toString(), label: user.email },
+          details: { email: user.email, attempts, lockedUntil: updateData.lockedUntil },
+          requestId: req.id,
+          ip: req.ip,
+        });
+      }
 
       return reply.status(401).send({
         code: 'unauthorized',
@@ -134,12 +158,22 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
       });
     }
 
+    let csrfToken: string | undefined;
+    const sessionId = req.cookies?.['session_id'];
+    if (sessionId) {
+      const session = await db.collection<SessionDocument>('sessions').findOne({ sessionId });
+      if (session) {
+        csrfToken = session.csrfToken;
+      }
+    }
+
     return reply.status(200).send({
       user: {
         id: user._id.toString(),
         email: user.email,
         role: user.role,
       },
+      ...(csrfToken ? { csrfToken } : {}),
     });
   });
 };

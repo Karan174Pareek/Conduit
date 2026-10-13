@@ -321,18 +321,18 @@ Plain config (ConfigMap): `PUBLIC_DASHBOARD_URL`, `PUBLIC_GATEWAY_URL`, `ALLOWED
 
 All under `/api`, JSON, session cookie + `x-csrf-token` on mutations, `x-request-id` echoed.
 
-| Area | Endpoints | Role |
+| Area | Endpoints | Auth & Role Requirements |
 |---|---|---|
-| Auth | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/accept-invite` | any |
-| Users | `GET /users`, `POST /invites`, `PATCH /users/:id` (role, disable) | admin |
-| Keys | `GET /keys` (own; admin: all), `POST /keys`, `DELETE /keys/:id` (own; admin: any) | member/admin |
-| Servers | `GET /servers`, `POST /servers`, `PATCH /servers/:id`, `DELETE /servers/:id`, `POST /servers/test`, `GET /servers/:id/tools`, `POST /servers/:id/tools/approve` | admin (GET: member sees name, status, tools only) |
-| Policies | `GET/PUT /policies` | admin |
-| Audit | `GET /audit` (own for members; all for admin), `GET /audit/export.csv`, `GET /admin-events` | member/admin |
-| Chat | `POST /chat` (SSE), `GET /conversations`, `GET /conversations/:id`, `DELETE /conversations/:id` | member/admin |
-| Stats | `GET /stats/servers` | admin |
-| Stores (bonus) | `GET/POST/DELETE /stores` | member (own) / admin |
-| Ops | `GET /healthz`, `GET /readyz`; `:9090/metrics` (internal only) | – |
+| Auth | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/accept-invite` (alias to `/api/invites/accept`) | Public (except `GET /me`: session cookie or API key; returns user and csrfToken) |
+| Users | `GET /api/users`, `POST /api/invites`, `POST /api/invites/accept`, `PATCH /api/users/:id` (role, disable) | Admin only (except `accept`: public single-use token; self-demote and last-admin protected) |
+| Keys | `GET /api/keys` (own; admin: all), `POST /api/keys`, `DELETE /api/keys/:id` (own; admin: any) | Member / Admin (session cookie + x-csrf-token) |
+| Servers | `GET /api/servers`, `POST /api/servers`, `PATCH /api/servers/:id`, `DELETE /api/servers/:id`, `POST /api/servers/test`, `GET /api/servers/:id/tools`, `POST /api/servers/:id/tools/approve` | Admin only (except `GET /servers` and `GET /servers/:id/tools`: member sees reduced view with status & tools, no URL and no auth) |
+| Policies | `GET/PUT /api/policies` | Admin only (Phase 8) |
+| Audit | `GET /api/audit` (own for members; all for admin), `GET /api/audit/export.csv`, `GET /api/admin-events` | Member / Admin (admin-events: admin only; CSV export: formula injection protected) |
+| Chat | `POST /api/chat` (SSE), `GET /api/conversations`, `GET /api/conversations/:id`, `DELETE /api/conversations/:id` | Member / Admin (Phase 5) |
+| Stats | `GET /api/stats/servers` | Admin only (24h aggregated tool calls, error count, avg latency) |
+| Ops | `GET /healthz`, `GET /readyz` | Public (readyz gates on DB migrations & flips to 503 during graceful shutdown) |
+| MCP Front Door | `POST /mcp` (Streamable HTTP / JSON-RPC 2.0) | API key only (session cookie rejected; 401 on disabled user or revoked key) |
 
 ## 12. Observability
 
