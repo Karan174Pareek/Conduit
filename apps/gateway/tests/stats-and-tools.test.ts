@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoClient, type Db } from 'mongodb';
 import http from 'node:http';
 import { buildApp } from '../src/app.js';
+import type { FastifyInstance } from 'fastify';
 import { runMigrations } from '../src/db/migrations/runner.js';
 import { hashPassword } from '../src/services/password.js';
 import type { Config } from '../src/config.js';
@@ -9,7 +10,7 @@ import type { Config } from '../src/config.js';
 describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000 }, () => {
   let client: MongoClient;
   let db: Db;
-  let app: any;
+  let app: FastifyInstance;
   let mockServer: http.Server;
   let mockServerPort: number;
   const dbName = `test-dashboard-stats-${Date.now()}`;
@@ -39,7 +40,7 @@ describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000
             return;
           }
 
-          let json: any = {};
+          let json: Record<string, unknown> = {};
           try {
             json = JSON.parse(body);
           } catch {
@@ -284,12 +285,12 @@ describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000
       const adminTools = adminRes.json().tools;
       expect(adminTools).toHaveLength(2);
 
-      const approvedToolAdmin = adminTools.find((t: any) => t.name === 'approved_tool');
+      const approvedToolAdmin = adminTools.find((t: { name: string; descriptionRaw?: string; hash?: string; approval?: { status: string } }) => t.name === 'approved_tool');
       expect(approvedToolAdmin.approval.status).toBe('approved');
       expect(approvedToolAdmin.descriptionRaw).toBe('Raw un-sanitized approved description with tags');
       expect(approvedToolAdmin.hash).toBe('hash-approved-123');
 
-      const pendingToolAdmin = adminTools.find((t: any) => t.name === 'pending_tool');
+      const pendingToolAdmin = adminTools.find((t: { name: string; descriptionRaw?: string; approval?: { status: string } }) => t.name === 'pending_tool');
       expect(pendingToolAdmin.approval.status).toBe('pending');
       expect(pendingToolAdmin.descriptionRaw).toBe('Raw pending description');
 
@@ -604,7 +605,7 @@ describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000
       });
 
       expect(res.statusCode).toBe(200);
-      const serverStats = res.json().stats.find((s: any) => s.serverSlug === serverSlug);
+      const serverStats = res.json().stats.find((s: { serverSlug: string }) => s.serverSlug === serverSlug);
       expect(serverStats).toBeDefined();
 
       expect(serverStats.totalCalls24h).toBe(10);

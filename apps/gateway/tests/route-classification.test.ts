@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { FastifyInstance, RouteOptions } from 'fastify';
 import { MongoClient, type Db, ObjectId } from 'mongodb';
 import { buildApp } from '../src/app.js';
 import type { Config } from '../src/config.js';
@@ -56,7 +57,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
   let adminCsrf: string;
   let memberCsrf: string;
   let validApiKey: string;
-  let testApp: any;
+  let testApp: FastifyInstance;
   const discoveredRoutes: Array<{ method: string; path: string }> = [];
 
   const rawMongoUri =
@@ -103,7 +104,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
     });
 
     // Introspect Fastify route table via onRoute hook
-    testApp.addHook('onRoute', (routeOptions: any) => {
+    testApp.addHook('onRoute', (routeOptions: RouteOptions) => {
       const methods = Array.isArray(routeOptions.method) ? routeOptions.method : [routeOptions.method];
       for (const m of methods) {
         if (m !== 'HEAD') {
