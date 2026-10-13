@@ -1,7 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Db } from 'mongodb';
 import type { Principal, Role } from '@conduit/shared';
-import { verifyApiKey } from '../services/api-keys.js';
 import { getSessionAndTouch } from '../services/sessions.js';
 import type { Config } from '../config.js';
 import type { SessionDocument } from '../db/types.js';
@@ -16,31 +15,16 @@ declare module 'fastify' {
 export async function authenticateRequest(
   req: FastifyRequest,
   db: Db,
-  config: Config,
+  _config: Config,
 ): Promise<Principal | null> {
-  // 1. Try Bearer token (API Key)
+  // 1. API keys work ONLY on POST /mcp.
+  // Any Bearer token on /api/* routes MUST be rejected immediately with 401.
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const rawKey = authHeader.slice(7).trim();
-    const result = await verifyApiKey(db, config.API_KEY_PEPPER, rawKey);
-    if (!result) {
-      return null;
-    }
-
-    const { key, user } = result;
-    const keyId = key._id ? key._id.toString() : undefined;
-    const principal: Principal = {
-      userId: user._id.toString(),
-      role: user.role as Role,
-      via: 'apikey',
-      keyId,
-      source: 'mcp',
-    };
-    req.principal = principal;
-    return principal;
+    return null;
   }
 
-  // 2. Try Session Cookie
+  // 2. Try Session Cookie (for /api/* routes)
   const sessionId = req.cookies?.['session_id'];
   if (sessionId) {
     const result = await getSessionAndTouch(db, sessionId);
@@ -52,6 +36,7 @@ export async function authenticateRequest(
     req.sessionDoc = session;
     const principal: Principal = {
       userId: user._id.toString(),
+      email: user.email,
       role: user.role as Role,
       via: 'session',
       source: 'chat',

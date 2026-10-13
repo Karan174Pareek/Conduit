@@ -230,12 +230,22 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     const rawApiKey = createdKey.key;
     const keyId = createdKey.id;
 
-    // Use the Bearer API key to call authenticated /api/keys route
-    const authRes = await app.inject({
+    // API key on /api/keys route must be rejected with 401 (API keys work ONLY on POST /mcp)
+    const apiKeyOnApiRes = await app.inject({
       method: 'GET',
       url: '/api/keys',
       headers: {
         authorization: `Bearer ${rawApiKey}`,
+      },
+    });
+    expect(apiKeyOnApiRes.statusCode).toBe(401);
+
+    // Authenticated session cookie to call /api/keys route succeeds
+    const authRes = await app.inject({
+      method: 'GET',
+      url: '/api/keys',
+      headers: {
+        cookie: `session_id=${sessionCookie?.value}`,
       },
     });
     expect(authRes.statusCode).toBe(200);

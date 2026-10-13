@@ -41,7 +41,7 @@ export const keysRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
       await db.collection<AdminEventDocument>('admin_events').insertOne({
         ts: new Date(),
         actorId: principal.userId,
-        actorEmail: (req as any).user?.email ?? principal.userId,
+        actorEmail: principal.email ?? 'unknown@conduit.localhost',
         action: 'key.issue',
         target: { type: 'key', id: createdKey.id, label: name },
         details: { keyId: createdKey.id, name, prefix: createdKey.prefix },
@@ -108,7 +108,7 @@ export const keysRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
     await db.collection<AdminEventDocument>('admin_events').insertOne({
       ts: new Date(),
       actorId: principal.userId,
-      actorEmail: (req as any).user?.email ?? principal.userId,
+      actorEmail: principal.email ?? 'unknown@conduit.localhost',
       action: 'key.revoke',
       target: { type: 'key', id, label: keyDoc.name },
       details: { keyId: id, prefix: keyDoc.prefix },

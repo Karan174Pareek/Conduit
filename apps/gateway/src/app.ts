@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyBaseLogger } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import type { Db } from 'mongodb';
 import crypto from 'node:crypto';
@@ -26,17 +26,22 @@ export interface AppDependencies {
   toolRouter?: ToolRouter;
   auditSink?: MongoAuditSink;
   isReady?: () => boolean;
+  loggerInstance?: FastifyBaseLogger;
 }
 
 export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): FastifyInstance {
   const app = Fastify({
-    logger: {
-      level: config.LOG_LEVEL,
-      redact: {
-        paths: REDACTED_PATHS,
-        censor: '[REDACTED]',
-      },
-    },
+    ...(deps.loggerInstance
+      ? { loggerInstance: deps.loggerInstance }
+      : {
+          logger: {
+            level: config.LOG_LEVEL,
+            redact: {
+              paths: REDACTED_PATHS,
+              censor: '[REDACTED]',
+            },
+          },
+        }),
     bodyLimit: 1024 * 1024, // 1 MB request body limit
     requestIdHeader: 'x-request-id',
     genReqId: (req) => {

@@ -57,6 +57,7 @@ export const mcpRoutes: FastifyPluginAsync<McpRouteOptions> = async (
     const { user, key } = verified;
     const principal: Principal = {
       userId: user._id.toString(),
+      email: user.email,
       role: user.role,
       via: 'apikey',
       keyId: key._id?.toString(),

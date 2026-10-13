@@ -150,7 +150,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     const principal = request.principal!;
     const userObjId = toObjectId(principal.userId);
     const user = userObjId ? await db.collection<UserDocument>('users').findOne({ _id: userObjId }) : null;
-    const actorEmail = user?.email ?? 'admin@conduit.localhost';
+    const actorEmail = request.principal?.email ?? user?.email ?? 'admin@conduit.localhost';
     const now = new Date();
 
     const serverObjId = new ObjectId();
@@ -266,7 +266,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     const principal = request.principal!;
     const userObjId = toObjectId(principal.userId);
     const user = userObjId ? await db.collection<UserDocument>('users').findOne({ _id: userObjId }) : null;
-    const actorEmail = user?.email ?? 'admin@conduit.localhost';
+    const actorEmail = request.principal?.email ?? user?.email ?? 'admin@conduit.localhost';
     const now = new Date();
     const updateFields: Partial<McpServerDocument> = {
       updatedAt: now,
@@ -369,7 +369,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     const principal = request.principal!;
     const userObjId = toObjectId(principal.userId);
     const user = userObjId ? await db.collection<UserDocument>('users').findOne({ _id: userObjId }) : null;
-    const actorEmail = user?.email ?? 'admin@conduit.localhost';
+    const actorEmail = request.principal?.email ?? user?.email ?? 'admin@conduit.localhost';
     const now = new Date();
 
     await db.collection<McpServerDocument>('mcp_servers').deleteOne(filter);
@@ -469,9 +469,33 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     }
 
     const serverId = server._id?.toString() ?? server.slug;
-    const tools = await db.collection<ToolCatalogDocument>('tool_catalog').find({ serverId }).toArray();
+    const principal = request.principal!;
+    const isAdmin = principal.role === 'admin';
 
-    reply.send({ tools });
+    // Member: approved tools only
+    // Admin: tools with approval state, description, descriptionRaw, hash status
+    const query = isAdmin
+      ? { serverId, removedAt: null }
+      : { serverId, 'approval.status': 'approved', removedAt: null };
+
+    const tools = await db.collection<ToolCatalogDocument>('tool_catalog').find(query).toArray();
+
+    reply.send({
+      tools: tools.map((t) => ({
+        name: t.name,
+        exposedName: t.exposedName,
+        description: t.description,
+        ...(isAdmin
+          ? {
+              descriptionRaw: t.descriptionRaw ?? t.description,
+              approval: t.approval,
+              hash: t.hash,
+              lastSeenAt: t.lastSeenAt,
+            }
+          : {}),
+        inputSchema: t.inputSchema,
+      })),
+    });
   });
 
   // 7. POST /api/servers/:id/tools/approve (admin only)
@@ -503,7 +527,7 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     const principal = request.principal!;
     const userObjId = toObjectId(principal.userId);
     const user = userObjId ? await db.collection<UserDocument>('users').findOne({ _id: userObjId }) : null;
-    const actorEmail = user?.email ?? 'admin@conduit.localhost';
+    const actorEmail = request.principal?.email ?? user?.email ?? 'admin@conduit.localhost';
 
     const approvedTool = await catalogService.approveTool(
       serverId,

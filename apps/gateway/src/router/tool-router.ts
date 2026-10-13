@@ -7,6 +7,7 @@ import type { ToolInvocationResult } from '../upstream/types.js';
 
 export interface Principal {
   userId: string;
+  email?: string;
   role: 'admin' | 'member';
   via: 'apikey' | 'session';
   keyId?: string | null;

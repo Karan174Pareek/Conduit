@@ -151,7 +151,7 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     // 1. Test completely wrong token
     const wrongRes = await app.inject({
       method: 'POST',
-      url: '/api/invites/accept',
+      url: '/api/auth/accept-invite',
       payload: {
         token: 'totally-invalid-and-nonexistent-token',
         name: 'Wrong Token User',
@@ -177,7 +177,7 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
 
     const expiredRes = await app.inject({
       method: 'POST',
-      url: '/api/invites/accept',
+      url: '/api/auth/accept-invite',
       payload: {
         token: expiredRawToken,
         name: 'Expired User',
@@ -221,7 +221,7 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     // 2. Accept invite
     const acceptRes = await app.inject({
       method: 'POST',
-      url: '/api/invites/accept',
+      url: '/api/auth/accept-invite',
       payload: {
         token,
         name: 'New Joiner',
@@ -242,7 +242,7 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     // 3. Attempting to reuse the same token must fail with identical generic error
     const reuseRes = await app.inject({
       method: 'POST',
-      url: '/api/invites/accept',
+      url: '/api/auth/accept-invite',
       payload: {
         token,
         name: 'Imposter',

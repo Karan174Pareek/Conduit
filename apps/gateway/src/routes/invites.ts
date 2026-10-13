@@ -84,7 +84,7 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     await db.collection<AdminEventDocument>('admin_events').insertOne({
       ts: now,
       actorId: principal.userId,
-      actorEmail: (request as any).user?.email ?? principal.userId,
+      actorEmail: principal.email ?? 'admin@conduit.localhost',
       action: 'user.invite',
       target: { type: 'invite', id: inserted.insertedId.toString(), label: body.email },
       details: { email: body.email, role: body.role, expiresAt },
@@ -172,6 +172,6 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     });
   };
 
-  fastify.post('/invites/accept', acceptHandler);
+  // Canonical invite accept route (no alias)
   fastify.post('/auth/accept-invite', acceptHandler);
 };
