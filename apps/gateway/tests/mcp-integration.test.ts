@@ -222,15 +222,30 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
     await mgr1.loadServers();
     await mgr2.loadServers();
 
-    // Admin writes a new server via app1
-    const adminUser = await db.collection('users').findOne({ email: testConfig.BOOTSTRAP_ADMIN_EMAIL });
-    const { key: adminKey } = await createApiKey(db, testConfig.API_KEY_PEPPER, adminUser!._id.toString(), 'admin-key');
+    // Admin writes a new server via app1 using session cookie & csrf
+    const loginRes = await app1.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: {
+        'content-type': 'application/json',
+        origin: 'http://dashboard.localhost',
+      },
+      payload: {
+        email: testConfig.BOOTSTRAP_ADMIN_EMAIL,
+        password: testConfig.BOOTSTRAP_ADMIN_PASSWORD,
+      },
+    });
+    expect(loginRes.statusCode).toBe(200);
+    const adminCookie = loginRes.headers['set-cookie'] as string;
+    const adminCsrf = loginRes.json().csrfToken;
 
     const createRes = await app1.inject({
       method: 'POST',
       url: '/api/servers',
       headers: {
-        authorization: `Bearer ${adminKey}`,
+        cookie: adminCookie,
+        'x-csrf-token': adminCsrf,
+        origin: 'http://dashboard.localhost',
       },
       payload: {
         slug: 'instance-test-srv',

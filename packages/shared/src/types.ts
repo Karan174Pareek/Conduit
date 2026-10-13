@@ -6,6 +6,7 @@ export type PrincipalSource = 'mcp' | 'chat';
 
 export interface Principal {
   userId: string;
+  email?: string;
   role: Role;
   via: AuthVia;
   keyId?: string;

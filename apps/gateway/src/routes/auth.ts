@@ -127,7 +127,7 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
   });
 
   // POST /api/auth/logout
-  fastify.post('/logout', async (req, reply) => {
+  fastify.post('/logout', { preHandler: requireAuth(db, config) }, async (req, reply) => {
     const sessionId = req.cookies?.['session_id'];
     if (sessionId) {
       await destroySession(db, sessionId);
