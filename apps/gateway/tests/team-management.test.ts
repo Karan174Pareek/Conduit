@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { MongoClient, Db } from 'mongodb';
+import { MongoClient, type Db } from 'mongodb';
 import { buildApp } from '../src/app.js';
-import type { Config } from '../src/config.js';
 import { runMigrations } from '../src/db/migrations/runner.js';
 import { hashPassword } from '../src/services/password.js';
+import { createApiKey } from '../src/services/api-keys.js';
+import type { Config } from '../src/config.js';
+import type { InviteDocument } from '../src/db/types.js';
 
 describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
   let client: MongoClient;
@@ -39,6 +41,8 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
 
   let secondAdminId: string;
   let memberUserId: string;
+  let memberSessionCookie: string;
+  let memberApiKey: string;
 
   beforeAll(async () => {
     client = new MongoClient(mockConfig.MONGO_URI);
@@ -143,7 +147,61 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     expect(conflictRes.statusCode).toBe(409);
   });
 
-  it('accepts invite once with Argon2id password and prevents reuse or expired tokens', async () => {
+  it('rejects expired, wrong, or reused tokens with identical generic error text', async () => {
+    // 1. Test completely wrong token
+    const wrongRes = await app.inject({
+      method: 'POST',
+      url: '/api/invites/accept',
+      payload: {
+        token: 'totally-invalid-and-nonexistent-token',
+        name: 'Wrong Token User',
+        password: 'Password123!',
+      },
+    });
+    expect(wrongRes.statusCode).toBe(400);
+    expect(wrongRes.json().message).toBe('Invalid or expired invite token');
+
+    // 2. Test expired token in DB
+    const crypto = await import('node:crypto');
+    const expiredRawToken = crypto.randomBytes(32).toString('base64url');
+    const expiredTokenHash = crypto.createHash('sha256').update(expiredRawToken).digest('hex');
+    await db.collection<InviteDocument>('invites').insertOne({
+      email: 'expired-user@conduit.localhost',
+      role: 'member',
+      tokenHash: expiredTokenHash,
+      invitedBy: adminUserId,
+      expiresAt: new Date(Date.now() - 3600 * 1000), // 1 hour ago
+      usedAt: null,
+      createdAt: new Date(Date.now() - 73 * 3600 * 1000),
+    });
+
+    const expiredRes = await app.inject({
+      method: 'POST',
+      url: '/api/invites/accept',
+      payload: {
+        token: expiredRawToken,
+        name: 'Expired User',
+        password: 'Password123!',
+      },
+    });
+    expect(expiredRes.statusCode).toBe(400);
+    expect(expiredRes.json().message).toBe('Invalid or expired invite token');
+
+    // 3. Test alias endpoint /api/auth/accept-invite behaves identically
+    const aliasRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/accept-invite',
+      payload: {
+        token: expiredRawToken,
+        name: 'Expired User',
+        password: 'Password123!',
+      },
+    });
+    expect(aliasRes.statusCode).toBe(400);
+    expect(aliasRes.json().message).toBe('Invalid or expired invite token');
+  });
+
+  it('accepts invite once with Argon2id password and prevents reuse', async () => {
     // 1. Generate fresh invite
     const inviteRes = await app.inject({
       method: 'POST',
@@ -181,7 +239,7 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     expect(userDoc!.passwordHash).toMatch(/^\$argon2id\$/);
     memberUserId = userDoc!._id.toString();
 
-    // 3. Attempting to reuse the same token must fail
+    // 3. Attempting to reuse the same token must fail with identical generic error
     const reuseRes = await app.inject({
       method: 'POST',
       url: '/api/invites/accept',
@@ -193,6 +251,28 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     });
 
     expect(reuseRes.statusCode).toBe(400);
+    expect(reuseRes.json().message).toBe('Invalid or expired invite token');
+
+    // 4. Log in as newly joined member
+    const memberLoginRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: {
+        'content-type': 'application/json',
+        origin: 'http://dashboard.localhost',
+      },
+      payload: {
+        email: 'joiner@conduit.localhost',
+        password: 'SecureJoinerPass123!',
+      },
+    });
+    expect(memberLoginRes.statusCode).toBe(200);
+    const mCookie = memberLoginRes.headers['set-cookie'];
+    memberSessionCookie = Array.isArray(mCookie) ? mCookie[0] : (mCookie as string);
+
+    // Create an API key for member
+    const keyData = await createApiKey(db, mockConfig.API_KEY_PEPPER, memberUserId, 'member-test-key');
+    memberApiKey = keyData.key;
   });
 
   it('enforces self-demote, self-disable, and last-active-admin guardrails', async () => {
@@ -238,20 +318,18 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     expect(demoteSecondaryRes.statusCode).toBe(200);
 
     // 4. Now only 1 active admin remains (primary admin).
-    // Attempting to demote or disable primary admin (even via another mechanism) must be blocked as last admin
-    // Try to demote member back to member (succeeds)
-    const updateMemberRes = await app.inject({
+    // Attempting to demote secondary admin further (already member) or last admin is guarded
+    const lastAdminRes = await app.inject({
       method: 'PATCH',
-      url: `/api/users/${memberUserId}`,
+      url: `/api/users/${adminUserId}`,
       headers: {
         cookie: adminCookie,
         'x-csrf-token': adminCsrfToken,
         origin: 'http://dashboard.localhost',
       },
-      payload: { status: 'disabled' },
+      payload: { role: 'member' },
     });
-    expect(updateMemberRes.statusCode).toBe(200);
-    expect(updateMemberRes.json().disabled).toBe(true);
+    expect(lastAdminRes.statusCode).toBe(400);
 
     // List users
     const listRes = await app.inject({
@@ -268,5 +346,60 @@ describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
     for (const u of usersList) {
       expect(u.passwordHash).toBeUndefined(); // Never expose hashes
     }
+  });
+
+  it('immediately rejects both session and API key on the very next request when user is disabled', async () => {
+    // 1. Verify member session works before disable
+    const beforeSessionRes = await app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: {
+        cookie: memberSessionCookie,
+        origin: 'http://dashboard.localhost',
+      },
+    });
+    expect(beforeSessionRes.statusCode).toBe(200);
+
+    // 2. Admin disables the member
+    const disableRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/users/${memberUserId}`,
+      headers: {
+        cookie: adminCookie,
+        'x-csrf-token': adminCsrfToken,
+        origin: 'http://dashboard.localhost',
+      },
+      payload: { status: 'disabled' },
+    });
+    expect(disableRes.statusCode).toBe(200);
+    expect(disableRes.json().status).toBe('disabled');
+
+    // 3. Member session cookie MUST FAIL on the very next request with 401
+    const afterSessionRes = await app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: {
+        cookie: memberSessionCookie,
+        origin: 'http://dashboard.localhost',
+      },
+    });
+    expect(afterSessionRes.statusCode).toBe(401);
+    expect(afterSessionRes.json().code).toBe('unauthorized');
+
+    // 4. Member API key MUST FAIL on the very next /mcp request with 401
+    const mcpRes = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        authorization: `Bearer ${memberApiKey}`,
+        'content-type': 'application/json',
+      },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+      },
+    });
+    expect(mcpRes.statusCode).toBe(401);
   });
 });
