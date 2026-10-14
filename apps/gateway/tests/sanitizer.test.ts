@@ -67,6 +67,21 @@ describe('Catalog Sanitizer', () => {
     expect(res.error).toContain('Schema depth exceeds maximum allowed depth');
   });
 
+  it('rejects schemas exceeding maximum size (64 KB)', () => {
+    const largeObject: Record<string, string> = {};
+    for (let i = 0; i < 2000; i++) {
+      largeObject[`file_${i}`] = 'val_'.repeat(10);
+    }
+    const res = validateAndSanitizeSchema({ type: 'object', properties: largeObject });
+    expect(res.valid).toBe(false);
+    expect(res.error).toContain('Schema size exceeds maximum allowed size');
+  });
+
+  it('strips Unicode tag characters', () => {
+    const withTags = 'Hello\uDB40\uDC01\uDB40\uDC20World';
+    const clean = sanitizeText(withTags);
+    expect(clean).toBe('HelloWorld');
+  });
   it('computes deterministic canonical JSON hashes regardless of key insertion order', () => {
     const toolA = {
       name: 'test_tool',

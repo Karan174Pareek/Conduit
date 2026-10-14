@@ -99,3 +99,15 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           trivyignores: '.trivyignore.yaml'
+
+      - name: Build Dashboard Docker Image
+        run: docker build -t conduit/dashboard:ci -f apps/dashboard/Dockerfile .
+
+      - name: Trivy Dashboard Image Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: 'conduit/dashboard:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true

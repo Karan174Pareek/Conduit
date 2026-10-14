@@ -5,8 +5,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: [
-      'packages/**/*.{test,spec}.ts',
-      'apps/**/*.{test,spec}.ts',
+      'packages/**/*.{test,spec}.{ts,tsx}',
+      'apps/**/*.{test,spec}.{ts,tsx}',
     ],
   },
 });

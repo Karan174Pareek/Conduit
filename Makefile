@@ -17,7 +17,10 @@ help:
 	@echo "  make helm-lint       - Lint Helm charts"
 	@echo "  make helm-template   - Render Helm templates for local and prod values"
 	@echo "  make load            - Import container images into k3d cluster"
-	@echo "  make e2e             - Run end-to-end acceptance suite"
+	@echo "  make deploy-local    - Build, load, upgrade, and verify all local services"
+	@echo "  make e2e             - Run all unit and integration tests"
+	@echo "  make e2e-gateway     - Run Gateway MCP E2E test suite"
+	@echo "  make e2e-ui          - Run Phase 4 Dashboard Playwright smoke test"
 
 .PHONY: cluster-up
 cluster-up:
@@ -38,9 +41,11 @@ build:
 	npm run build --workspace=@conduit/shared
 	npm run build --workspace=@conduit/gateway
 	npm run build --workspace=@conduit/woo-mcp
+	npm run build --workspace=@conduit/dashboard
 	docker build -t conduit/wordpress:6.7.2-wc9.6.2 -t conduit/wordpress:$(GIT_SHA) images/wordpress
 	docker build -t conduit/woo-mcp:$(GIT_SHA) -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
 	docker build -t conduit/gateway:$(GIT_SHA) -t conduit/gateway:latest -t conduit/gateway:0.1.0 -f apps/gateway/Dockerfile .
+	docker build -t conduit/dashboard:$(GIT_SHA) -t conduit/dashboard:latest -t conduit/dashboard:0.1.0 -f apps/dashboard/Dockerfile .
 
 .PHONY: test
 test:
@@ -93,6 +98,7 @@ load:
 	k3d image import conduit/wordpress:6.7.2-wc9.6.2 -c conduit
 	k3d image import conduit/woo-mcp:$(GIT_SHA) conduit/woo-mcp:latest -c conduit
 	k3d image import conduit/gateway:$(GIT_SHA) conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
+	k3d image import conduit/dashboard:$(GIT_SHA) conduit/dashboard:latest conduit/dashboard:0.1.0 -c conduit
 
 .PHONY: deploy-local
 deploy-local: build load
@@ -100,6 +106,7 @@ deploy-local: build load
 	helm upgrade --install conduit charts/conduit -n conduit-system --create-namespace -f values/values-local.yaml --set images.tag=$(GIT_SHA)
 	helm upgrade --install store charts/woocommerce-store -n store-default --create-namespace -f values/values-local.yaml --set images.wooMcp=conduit/woo-mcp:$(GIT_SHA)
 	kubectl rollout status deployment/conduit-gateway -n conduit-system --timeout=120s
+	kubectl rollout status deployment/conduit-dashboard -n conduit-system --timeout=120s
 	kubectl rollout status deployment/store-woocommerce-store-woo-mcp -n store-default --timeout=120s
 	@echo "Local deployment successfully rolled out."
 
@@ -112,3 +119,8 @@ e2e:
 e2e-gateway:
 	@echo "Running Gateway E2E Flow..."
 	npx tsx scripts/e2e/gateway-flow.ts
+
+.PHONY: e2e-ui
+e2e-ui:
+	@echo "Running Phase 4 Dashboard Playwright smoke test..."
+	npx tsx scripts/e2e/ui-smoke.ts
