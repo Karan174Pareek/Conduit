@@ -1,237 +1,265 @@
 # Conduit System Walkthrough & Architectural Reference
 
-## 1. Architecture Overview
-Conduit is a multi-tenant, secure Model Context Protocol (MCP) gateway and governance proxy connecting AI assistants to business backends (such as WooCommerce stores). The system runs in a Kubernetes cluster across segregated namespaces: `conduit-system` (gateway core, MongoDB datastore, Traefik ingress controller) and per-store tenant namespaces (e.g. `store-default` housing WordPress, MariaDB, and the `woo-mcp` service).
-Public traffic enters via Traefik Ingress: `gateway.<domain>` exposes only `POST /mcp` (streamable HTTP MCP front-door requiring bearer API keys) and health probes (`/healthz`, `/readyz`); `dashboard.<domain>` exposes `/api/*` REST endpoints (requiring httpOnly session cookies and CSRF double-submit tokens) while leaving `/` reserved for the upcoming web dashboard. Internal services (MongoDB, MariaDB, WordPress admin, woo-mcp) are strictly ClusterIP-only. Network isolation is enforced cluster-wide via default-deny `NetworkPolicy` manifests with explicit allowlists: gateway connects to MongoDB (27017) and woo-mcp (3100), woo-mcp connects only to WordPress REST (80), and all cross-namespace or unlabelled pod access is denied.
+This document provides a verified, production-grade technical walkthrough of the Conduit system based on direct inspection of the live code and running Kubernetes cluster in `/home/karan/conduit`.
+
+---
+
+## 1. Architecture in 10 Lines
+
+1. **Topology**: Single-organisation MCP gateway running on Kubernetes (k3d locally, EKS in production) across isolated namespaces: `conduit-system` (control plane) and `store-default` (WooCommerce tenant backends).
+2. **Gateway**: Node.js 22 + TypeScript + Fastify v5 stateless proxy enforcing authentication, upstream connection pooling, circuit breakers, and tool catalog isolation.
+3. **Dashboard**: React 19 + TypeScript + Vite 6 Single Page Application served via unprivileged Nginx (UID 101) with strict Content Security Policy (no unsafe-inline, no unsafe-eval).
+4. **Upstream MCP Adapter**: Python FastMCP wrapper (`apps/woo-mcp`) bridging JSON-RPC MCP calls to WooCommerce REST API over HTTP with consumer key/secret authentication.
+5. **Data Plane**: MongoDB 7 StatefulSet storing users, hashed credentials, sessions, server registrations, tool catalogs, and audit logs.
+6. **Ingress Entrypoints**: Managed by Traefik in `kube-system` exposed on host port 80.
+7. **Public Routing**: `gateway.<domain>` routes only `/mcp`, `/healthz`, and `/readyz` to the gateway; `dashboard.<domain>` routes `/api` to the gateway and `/` to the dashboard SPA.
+8. **Internal-Only Services**: MongoDB (port 27017), Woo-MCP (port 3100), and WordPress/MariaDB have no external Ingress and are unreachable outside the cluster.
+9. **Network Isolation**: Enforced via Kubernetes `NetworkPolicy` resources defaulting to default-deny with explicit ingress/egress allowances per workload.
+10. **SSRF Guard Status**: Basic URL format validation is implemented in the gateway; NetworkPolicy is NOT an SSRF defence (gateway can reach MongoDB and port 3100 in store namespaces); full DNS rebinding and internal IP blacklisting is deferred to Phase 8.
 
 ---
 
 ## 2. Repository Map
 
-| Path | Purpose / Contents |
-|---|---|
-| `apps/gateway/` | Fastify-based MCP gateway core, registry, auth, tool routing, upstream resilience, and REST APIs |
-| `apps/gateway/src/index.ts` | Entry point: loads config, establishes Mongo connection, executes migrations, seeds bootstrap data, starts server |
-| `apps/gateway/src/app.ts` | `buildApp()` factory: registers Fastify plugins, error handlers, and sets up service instances |
-| `apps/gateway/src/config.ts` | Zod schema validation for environment variables, secrets parsing, encryption key ring decoding |
-| `apps/gateway/src/logger.ts` | Pino logger configuration with sensitive field redaction rules (`REDACTED_PATHS`) |
-| `apps/gateway/src/db/` | MongoDB connection utilities, distributed lock, types, and forward-only migration runner |
-| `apps/gateway/src/db/migrations/` | Database migrations: `0001_init.ts` (core collections), `0002_fix_tool_catalog_indexes.ts` (catalog compound indexes), `0003_audit_and_team.ts` (audit & events TTL) |
-| `apps/gateway/src/registry/` | Upstream credential crypto (`crypto.ts`), URL security policy (`url-policy.ts`), bootstrap seeding (`seed.ts`) |
-| `apps/gateway/src/catalog/` | `CatalogService`: tool discovery, description sanitization, schema hashing, approval workflows |
-| `apps/gateway/src/upstream/` | `UpstreamManager`: upstream MCP client connections, per-server circuit breakers, bulkheads, health probes |
-| `apps/gateway/src/router/` | `ToolRouter`: route resolution, namespacing (`<server>__<tool>`), authorization, quarantine/approval checks |
-| `apps/gateway/src/mcp/` | Model Context Protocol streamable HTTP front-door transport and JSON-RPC dispatch |
-| `apps/gateway/src/middleware/` | Authentication (`authenticator.ts` - cookie/bearer separation), roles (`roles.ts`), CSRF protection (`csrf.ts`) |
-| `apps/gateway/src/services/` | Business services: Argon2id password hashing (`password.ts`), HMAC API keys (`api-keys.ts`), sessions (`sessions.ts`) |
-| `apps/gateway/src/audit/` | Async bounded audit queue (`sink.ts`), log redaction & CSV formula neutralization (`redaction.ts`) |
-| `apps/gateway/src/routes/` | REST routes: `auth.ts`, `keys.ts`, `servers.ts`, `audit.ts`, `invites.ts`, `users.ts`, `health.ts`, `mcp.ts` |
-| `apps/gateway/tests/` | Vitest integration and unit test suites (27 test files covering security, auth matrix, router, breaker, netpol) |
-| `apps/woo-mcp/` | Dedicated MCP server exposing WooCommerce REST API as MCP tools (`list_products`, `update_order`, etc.) |
-| `packages/shared/` | Shared TypeScript domain contracts, interfaces, error types (`ConduitError`), and constants |
-| `charts/conduit/` | Helm chart for the Conduit control plane (Gateway, MongoDB, Ingress, NetworkPolicies, ServiceMonitor) |
-| `charts/woocommerce-store/` | Helm chart for WooCommerce store instance (WordPress, MariaDB, woo-mcp, NetworkPolicies, setup Job) |
-| `scripts/` | Operational scripts: cluster lifecycle (`cluster-up.sh`), netpol verification (`test-netpol-proof.sh`), E2E flow (`e2e/gateway-flow.ts`) |
-| `images/` | Dockerfiles and container configurations for custom service images |
-| `docs/` | Architectural specifications: `ARCHITECTURE.md`, `SECURITY.md`, `DATABASE.md`, `ERROR_HANDLING.md`, `PHASES.md` |
-| `values/` | Helm values configurations: `values-local.yaml` (k3d local dev) and `values-prod.yaml` (production TLS/SSO) |
-| `Makefile` | Standardized development targets: `build`, `test`, `lint`, `typecheck`, `helm-lint`, `deploy-local`, `e2e-gateway` |
+| Path | Purpose |
+| :--- | :--- |
+| `apps/gateway/src/config.ts` | Environment validation with Zod, secret parsing, hex-encoded encryption keyrings |
+| `apps/gateway/src/logger.ts` | Pino logger configuration with sensitive path redaction rules (REDACTED_PATHS) |
+| `apps/gateway/src/app.ts` | Fastify application factory, plugin registration, preHandler hooks |
+| `apps/gateway/src/db/` | MongoDB connection utilities, distributed lock, schema types, migration runner |
+| `apps/gateway/src/db/migrations/` | Forward-only migrations: `0001_init.ts`, `0002_fix_tool_catalog_indexes.ts`, `0003_audit_and_team.ts` |
+| `apps/gateway/src/registry/` | Upstream credential crypto (`crypto.ts`), URL policy (`url-policy.ts`), seed runner (`seed.ts`) |
+| `apps/gateway/src/catalog/` | `CatalogService` (`service.ts`): tool sync, canonical hashing, approval workflow; `sanitizer.ts`: description & schema sanitizing |
+| `apps/gateway/src/upstream/` | `UpstreamManager` (`manager.ts`): MCP connections, 3-strike circuit breaker, bulkhead, health check loop |
+| `apps/gateway/src/router/` | `ToolRouter` (`tool-router.ts`): tool resolution, namespace translation (`<server>__<tool>`), authorization |
+| `apps/gateway/src/mcp/` | Streamable HTTP transport and MCP JSON-RPC protocol server (`server.ts`) |
+| `apps/gateway/src/middleware/` | Session/cookie auth (`authenticator.ts`), RBAC guards (`roles.ts`), CSRF token verification (`csrf.ts`) |
+| `apps/gateway/src/services/` | Argon2id password hashing (`password.ts`), HMAC API key management (`api-keys.ts`), sessions (`sessions.ts`) |
+| `apps/gateway/src/routes/` | REST controllers: `auth.ts`, `keys.ts`, `users.ts`, `invites.ts`, `servers.ts`, `audit.ts`, `health.ts`, `mcp.ts` |
+| `apps/dashboard/src/` | React 19 SPA: Pages (Login, Servers, Team, Keys, Audit, Connect), UI components, API client |
+| `apps/dashboard/nginx.conf` | Non-root Nginx config with strict CSP, security headers, and health probe endpoint |
+| `apps/woo-mcp/` | Python FastMCP server converting MCP tool calls to WooCommerce REST API requests |
+| `packages/shared/` | Shared TypeScript types, Zod schemas, ConduitError class, and error taxonomy |
+| `charts/conduit/` | Helm chart for Gateway, Dashboard, MongoDB, NetworkPolicies, and Ingress |
+| `charts/woocommerce-store/` | Helm chart for WooCommerce store: WordPress, MariaDB, Woo-MCP adapter, setup Job |
+| `scripts/e2e/` | End-to-end integration and smoke tests (`gateway-flow.ts`, `ui-smoke.ts`) |
+| `docs/` | System documentation: PRD, Architecture, Security, Database, Phases, Walkthrough |
+| `Makefile` | Automation targets: cluster lifecycle, builds, deployments, testing, security scans |
 
 ---
 
 ## 3. End-to-End System Flows
 
-### a) Gateway Startup & Readiness
-1. `index.ts:main()` calls `loadConfig(process.env)` (`config.ts`), parsing and validating secrets (MongoDB URI, encryption key ring, session secret, API key pepper).
-2. `connectMongo()` initializes a MongoDB connection pool.
-3. `runMigrations(db, lockHolderId)` acquires a MongoDB distributed lease on `system_state._id='migration_lock'` with TTL heartbeat. If locked, waits up to 60s. Runs forward-only migrations (`0001_init`, `0002_fix_tool_catalog_indexes`, `0003_audit_and_team`) updating `system_state._id='schema'`.
-4. `seedDefaultServers(db, config, crypto)` idempotently creates the bootstrap admin user (if absent) and registers the system `woo` server upstream using `CredentialCrypto.encrypt()`.
-5. `buildApp(config, db, deps)` wires `UpstreamManager`, `CatalogService`, `ToolRouter`, and `MongoAuditSink`.
-6. `UpstreamManager.start()` connects to all enabled upstreams in parallel, polls tools, and initiates background health checks (`runHealthLoop()` every 10s).
-7. `app.listen({ port, host })` binds Fastify. Probe `GET /readyz` checks DB ping and `schemaVersion === 3`; flips to 503 upon receiving `SIGTERM` while in-flight drain completes.
+### a) Gateway Startup Flow
+1. **Config Validation** (`apps/gateway/src/config.ts:validateConfig`): Parses environment variables via Zod. Validates AES-256-GCM keyring, API key pepper, and session secret.
+2. **MongoDB Connection** (`apps/gateway/src/db/connection.ts:connectMongo`): Establishes authenticated client connection to MongoDB.
+3. **Distributed Migration Lock** (`apps/gateway/src/db/migrations/runner.ts:runMigrations`):
+   - Acquires distributed TTL lock in `system_state` (`_id: 'migration_lock'`).
+   - Executes pending migrations sequentially: `0001_init.ts` -> `0002_fix_tool_catalog_indexes.ts` -> `0003_audit_and_team.ts`.
+   - Records current version in `system_state` (`_id: 'schema', version: 3`).
+   - Releases lock cleanly.
+4. **Bootstrap Admin Seeding** (`apps/gateway/src/db/seed.ts:seedBootstrapAdmin`): Idempotently seeds initial administrator with Argon2id hash.
+5. **First-Party Upstream Seeding** (`apps/gateway/src/registry/seed.ts:seedDefaultServers`): Upserts default WooCommerce server (`slug: 'woo'`, `trusted: true`).
+6. **Background Loops Initialization**:
+   - `UpstreamManager.startHealthLoop()`: Starts 10-second periodic health check loop.
+   - `MongoAuditSink`: Starts 250ms interval batch flush timer.
+7. **Readiness Probe** (`apps/gateway/src/routes/health.ts:GET /readyz`): Returns 200 OK once schema version equals latest target (version 3) and MongoDB ping succeeds.
 
 ### b) Authentication & Key Lifecycle
-1. **Login**: Client posts credentials to `POST /api/auth/login` (`routes/auth.ts`). `verifyPassword(hash, pass)` executes Argon2id constant-time verification. On failure, increments `failedLoginAttempts`; after 10 failures, sets `lockedUntil = now + 15m`. On success, resets counter, generates a cryptographically random 256-bit session token, stores SHA-256 hash in `sessions` collection (8h sliding TTL), and issues httpOnly, SameSite=Lax cookie plus returns in-memory `csrfToken`.
-2. **Session Verification**: Requests to `/api/*` pass `requireAuth()` (`middleware/authenticator.ts`). Session cookie is hashed and checked against `sessions`. If user is disabled (`disabled === true`), 401 Unauthorized is returned immediately. Populates `request.principal = { userId, email, role, via: 'session' }`.
-3. **API Key Generation**: Member sends `POST /api/keys` with `x-csrf-token`. `createApiKey()` generates `mcpgw_<prefix>_<secret>`. Generates HMAC-SHA256 hash with server pepper `API_KEY_PEPPER`. Stores prefix, keyHash, and metadata in `api_keys`. Returns raw secret to user once.
-4. **API Key Verification**: On `POST /mcp`, `mcpRoutes` validates bearer token against HMAC hash in DB. Rejects disabled user, expired keys, or revoked keys with identical 401. API keys are strictly rejected on all `/api/*` endpoints.
+1. **Login** (`POST /api/auth/login`): Verifies email and Argon2id password hash. Rejects after 10 failed attempts (lockout). Issues cryptographically random session token (SHA-256 hashed in DB) set in `httpOnly, secure, sameSite=lax` cookie `__Host-conduit_session`. Returns in-memory CSRF token.
+2. **Session Verification** (`apps/gateway/src/middleware/authenticator.ts:requireAuth`): Reads cookie, hashes token with SHA-256, validates expiration in `sessions` collection, and loads user role and email into `request.principal`.
+3. **CSRF Protection** (`apps/gateway/src/middleware/csrf.ts:verifyCsrfToken`): Validates `x-csrf-token` header on all mutating methods (POST, PUT, PATCH, DELETE) against the session; enforces origin verification against `ALLOWED_ORIGINS`.
+4. **API Key Generation** (`POST /api/keys`): Admin or Member creates an API key. Key format: `mcpgw_<prefix>_<secret>`. Stores HMAC-SHA256(secret, pepper) in `api_keys` collection. Returns full plaintext key ONCE.
+5. **API Key Verification** (`apps/gateway/src/services/api-keys.ts:verifyApiKey`): Verifies HMAC-SHA256 hash using constant-time comparison against MongoDB. Resolves owner user document.
+6. **API Key Domain Restriction**: API keys work ONLY on `POST /mcp`. Any attempt to use an API key on `/api/*` returns 401 Unauthorized.
 
-### c) MCP Tool Execution (`tools/call`)
-1. Client POSTs streamable HTTP / JSON-RPC to `/mcp` with `Authorization: Bearer mcpgw_...`.
-2. `mcp.ts` authenticates bearer key and delegates to `ToolRouter.callTool(principal, toolName, args)`.
-3. `ToolRouter` splits exposed name `<server>__<tool>` into upstream slug and tool name.
-4. Checks approval status in `tool_catalog`: if tool is pending, quarantined, or disabled, returns identical generic `"Unknown tool"` error (preventing tool enumeration).
-5. Invokes `UpstreamManager.callTool(serverSlug, toolName, args)`:
-   - Evaluates Circuit Breaker (`circuit-breaker.ts`): if state is `open`, immediately returns `[gateway:circuit_open]` (fast fail, 0 upstream traffic).
-   - Evaluates Bulkhead (`bulkhead.ts`): enforces concurrency cap (default 10); if full, returns `[gateway:bulkhead_rejected]`.
-   - Acquires client, decrypts bearer credential via `CredentialCrypto.decrypt()`, and sends JSON-RPC `tools/call` over streamable HTTP with timeout (`callTimeoutMs`).
-6. Upstream response is received: results exceeding `MAX_RESULT_BYTES` (512 KB) are trimmed with `[TRUNCATED]` indicator.
-7. Logs event and enqueues record into `MongoAuditSink` (async bounded queue) recording duration, sanitized argument summary, argument hash, and outcome.
+### c) MCP Tool Execution Flow
+1. **Transport**: MCP client (Cursor, Claude Code) sends JSON-RPC `tools/call` to `POST /mcp` with `Authorization: Bearer mcpgw_...`.
+2. **Auth Verification**: Gateway validates Bearer token via `verifyApiKey`. Constructs `Principal { userId, email, role, via: 'apikey', keyId, source: 'mcp' }`.
+3. **Dispatch**: Handled statelessly by MCP SDK `handleMcpStatelessRequest` (`apps/gateway/src/mcp/server.ts`).
+4. **Resolution** (`apps/gateway/src/router/tool-router.ts:call`): Splits exposed name (e.g. `woo_list_products` -> server: `woo`, tool: `list_products`).
+5. **Authorization & Quarantine Check**:
+   - Queries `tool_catalog`.
+   - If tool is not found, not approved, or marked `changed`, returns identical `"Unknown tool"` error (McpError MethodNotFound).
+6. **Execution** (`apps/gateway/src/upstream/manager.ts:invokeTool`):
+   - **Circuit Breaker Check**: If phase is `open`, immediately throws `circuit_open` (HTTP 503). If `half_open`, allows exactly 1 probe call while rejecting others.
+   - **Bulkhead Check**: If in-flight calls >= `maxConcurrent` (default 8), increments rejection metric and throws `upstream_busy` (HTTP 503).
+   - **Timeout Enforcement**: Enforces timeout via `AbortController` (default 30s).
+   - **Credential Decryption**: Decrypts upstream token using AES-256-GCM.
+   - **Upstream Call**: Sends tool call to `apps/woo-mcp` over Streamable HTTP.
+   - **Size Check**: If response serialized size > `MAX_RESULT_BYTES` (1 MB), throws `result_too_large` (HTTP 413).
+7. **Audit Record**: Records execution asynchronously into `MongoAuditSink` with duration, sanitized argument summary, argument hash, and outcome.
 
-### d) Upstream Health Loop & Circuit Breaker Recovery
-1. `UpstreamManager.runHealthLoop()` runs every 10s: executes lightweight ping / `tools/list` on each upstream.
-2. If upstream fails 5 consecutive times within rolling window, `CircuitBreaker` trips to `OPEN`.
-3. Subsequent tool calls immediately fail with `[gateway:upstream_unreachable]`. Server status in `mcp_servers` updates to `{ state: 'unreachable', reasonCode: 'upstream_unreachable' }`.
-4. After `resetTimeoutMs` (30s), Circuit Breaker enters `HALF_OPEN`, allowing a single probe request.
-5. If probe succeeds, Circuit Breaker resets to `CLOSED`, server state flips to `healthy`, and tools resume normal routing automatically.
+### d) Circuit Breaker State Machine & Health Loop
+1. **Location**: Built directly into `apps/gateway/src/upstream/manager.ts`.
+2. **Closed Phase**: Normal operation. Failures increment `consecutiveFailures`.
+3. **Trip Condition**: 3 consecutive network/timeout/5xx failures (or 1 failure during half-open) trip breaker to `open`. Upstream status is updated to `unreachable`.
+4. **Open Phase**: All incoming calls fail immediately with `circuit_open` (HTTP 503) without generating upstream network traffic.
+5. **Backoff & Jitter**: Initial backoff is 10 seconds, doubling up to 60 seconds maximum on repeated failures, applied with +/- 20% jitter.
+6. **Half-Open Phase**: Once backoff expires, exactly 1 request is permitted through as a probe.
+7. **Recovery**: If the probe succeeds, breaker transitions to `closed`, failures reset to 0, backoff resets to 10s, and upstream status resets to `connected`.
 
 ### e) Tool Catalog Sanitization & Pinning
-1. During upstream sync, `CatalogService.syncServerTools()` fetches tool schemas.
-2. Computes canonical SHA-256 hash of tool JSON Schema and sanitized description.
-3. If new: if server has `approveOnAdd: true`, marks `approved`; otherwise marks `pending`.
-4. If existing tool hash changed: resets status to `changed` (quarantined) so modified upstream tools cannot execute without re-approval.
-5. Tool descriptions are sanitized: strips HTML/script tags, escapes markdown injection vectors, preserving raw description only for admin inspection.
+1. **Discovery**: `CatalogService.syncServerTools()` fetches raw schemas from upstream.
+2. **Text Sanitization** (`apps/gateway/src/catalog/sanitizer.ts:sanitizeText`): Strips zero-width characters, bidi overrides, control characters, and Unicode tag characters. Caps description at 1000 characters.
+3. **Schema Validation** (`validateAndSanitizeSchema`): Rejects remote `$ref` (http/https), caps schema depth at 10, and enforces 64 KB schema size limit.
+4. **Canonical Hashing**: Computes deterministic SHA-256 hash across sorted JSON keys of { name, description, inputSchema, annotations }.
+5. **Auto-Approval**:
+   - `const autoApprove = server.trusted || server.approveOnAdd;`
+   - Seeded WooCommerce server has `trusted: true`, so its tools are approved automatically on initial sync.
+   - Untrusted servers without `approveOnAdd` start in `pending` state.
+6. **Tamper Detection (Quarantine)**: If an approved tool's definition hash changes in upstream, its status flips to `changed` (quarantined) until an administrator reviews and approves it.
 
 ### f) Audit Pipeline & Admin Events
-1. Tool invocations push `AuditRecord` to `MongoAuditSink.push()`. Queue is bounded (max 5,000 in-memory). If queue reaches capacity, drops oldest and increments metric `gateway_audit_dropped_total`.
-2. Batch worker flushes records every 500ms or 50 items using MongoDB `insertMany()` into `tool_calls`.
-3. Arguments undergo key redaction (`redactSensitiveKeys()`: censors keys matching `password`, `token`, `secret`, `authorization`, `credit_card`).
-4. Sensitive administrative actions (`key.issue`, `user.invite`, `tool.approve`, etc.) synchronously insert into `admin_events` recording real `actorEmail`.
-5. Both `tool_calls` and `admin_events` collections utilize MongoDB TTL indexes (default 90 days retention).
+1. **Queue Architecture**: In-memory ring buffer in `MongoAuditSink` (max 10,000 records). Drops oldest if full.
+2. **Flushing**: Background timer flushes every 250ms (or when batch size >= 50) using MongoDB `insertMany({ ordered: false })`.
+3. **Retries**: Up to 3 retry attempts with exponential backoff (50ms, 100ms). If all fail, logs error (no fail-closed block, no stderr fallback).
+4. **Graceful Shutdown**: Flushes remaining in-flight queue on SIGTERM / application close.
+5. **Admin Events**: Synchronous writes to `admin_events` recording security mutations (key issue/revoke, user invite/role change/disable, server add/remove/enable/disable, tool approve). Verified: `actorEmail` always contains `@`.
 
 ---
 
-## 4. Kubernetes Infrastructure & Workloads
+## 4. Kubernetes Workloads & Specifications
 
-### Namespaces & Pods
-- **`conduit-system`**:
-  - `conduit-gateway` (Deployment, 2 replicas in prod, 1 in local dev): listening on port 3000, non-root user `10001`, read-only rootfs, `seccompProfile: RuntimeDefault`, `drop: [ALL]`.
-  - `conduit-mongodb-0` (StatefulSet, 1 replica): persistent storage via PVC `data-conduit-mongodb-0` (local-path), port 27017.
-  - `traefik` (Ingress controller, DaemonSet/Deployment in `kube-system`).
-- **`store-default`**:
-  - `store-woocommerce-store-wordpress` (Deployment): port 80. Official Apache image starts as root to bind port 80 and switches to `www-data` (UID 33). Drops capabilities except `CHOWN, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE` (documented security exception).
-  - `store-woocommerce-store-mariadb-0` (StatefulSet): port 3306, backed by PVC.
-  - `store-woocommerce-store-woo-mcp` (Deployment): Node.js service port 3100, non-root, read-only rootfs.
+Verified from live cluster via `kubectl get deploy,sts -A -o json`:
 
-### Kubernetes Secrets (by Name)
-- `conduit-secrets`: Contains `MONGO_URI`, `SESSION_SECRET`, `API_KEY_PEPPER`, `CREDENTIAL_ENC_KEYS`, `BOOTSTRAP_ADMIN_PASSWORD`, `WOO_MCP_BEARER_TOKEN`, `GEMINI_API_KEY`.
-- `conduit-gateway-tls`: Ingress TLS certificate and private key (in production managed by cert-manager).
-- `store-woocommerce-store-secret`: MariaDB passwords and WordPress credentials.
+| Namespace | Kind | Name | Replicas | Image | Requests (CPU/Mem) | Limits (CPU/Mem) | Probes | Security Context | PVCs |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `conduit-system` | Deployment | `conduit-dashboard` | 1 | `conduit/dashboard:0.1.0` | 25m / 32Mi | 100m / 64Mi | R, L | UID 101, RO rootfs, drop ALL | - |
+| `conduit-system` | Deployment | `conduit-gateway` | 1 | `conduit/gateway:0.1.0` | 100m / 256Mi | 500m / 512Mi | S, R, L | UID 10001, RO rootfs, drop ALL | - |
+| `conduit-system` | StatefulSet | `conduit-mongodb` | 1 | `mongo:7` | 100m / 256Mi | 500m / 512Mi | S, R, L | UID 999, RO rootfs, drop ALL | - (emptyDir) |
+| `store-default` | Deployment | `store-woocommerce-store-woo-mcp` | 1 | `conduit/woo-mcp:685c31d` | 50m / 96Mi | 250m / 192Mi | R, L | UID 10001, RO rootfs, drop ALL | - |
+| `store-default` | Deployment | `store-woocommerce-store-wordpress` | 1 | `conduit/wordpress:6.7.2-wc9.6.2` | 200m / 384Mi | 1000m / 768Mi | S, R, L | Root exception (Apache), RO rootfs, drop ALL | `wp-content` |
+| `store-default` | StatefulSet | `store-woocommerce-store-mariadb` | 1 | `mariadb:11.4.5` | 100m / 256Mi | 500m / 512Mi | S, R, L | Default MariaDB user | - (emptyDir) |
+| `kube-system` | Deployment | `traefik` | 1 | `rancher/mirrored-library-traefik:3.6.13` | - / - | - / - | R, L | UID 65532, RO rootfs, drop ALL | - |
 
-### NetworkPolicies
-- `conduit-default-deny` & `store-woocommerce-store-default-deny`: Blanket ingress and egress deny across all pods.
-- `conduit-mongodb`: Allows ingress on port 27017 *only* from pods matching `app.kubernetes.io/name: gateway` in `conduit-system`.
-- `conduit-gateway`: Allows ingress from ingress controller (web entrypoint) on port 3000; allows egress to kube-dns (53), MongoDB (27017), and store namespaces on port 3100 (`woo-mcp`).
-- `store-woocommerce-store-woo-mcp`: Allows ingress on port 3100 *only* from gateway pods; egress *only* to WordPress service on port 80.
-- All direct external/unlabelled connections to MongoDB or woo-mcp are rejected.
+*Note: S = Startup Probe, R = Readiness Probe, L = Liveness Probe.*
+
+### Kubernetes Secrets (By Name Only)
+- `conduit-system`: `conduit-secrets`, `conduit-gateway-secrets`, Helm release state secrets (`sh.helm.release.v1.conduit.v*`).
+- `store-default`: `store-secrets`, Helm release state secrets (`sh.helm.release.v1.store.v*`).
+- `kube-system`: `chart-values-traefik`, `k3s-serving`, Traefik release secrets.
 
 ---
 
-## 5. Database Schema & Collections
+## 5. Live Database Collections & Indexes
 
-**Database**: `conduit` (MongoDB 7.0) | **Current Schema Version**: `3` (managed via `0003_audit_and_team.ts`)
+Verified from MongoDB (schema version: **3**, migration: `0003_audit_and_team`):
 
-| Collection | Purpose | Key Indexes |
-|---|---|---|
-| `system_state` | Migrations & distributed locks | `_id` |
-| `users` | Team user accounts & status | `{ email: 1 }` (unique), `{ role: 1 }` |
-| `sessions` | Active user web sessions | `{ sessionIdHash: 1 }` (unique), `{ expiresAt: 1 }` (TTL), `{ userId: 1 }` |
-| `api_keys` | Gateway MCP API keys | `{ keyHash: 1 }` (unique), `{ userId: 1 }`, `{ prefix: 1 }` |
-| `invites` | Pending team invites | `{ tokenHash: 1 }` (unique), `{ email: 1 }`, `{ expiresAt: 1 }` (TTL) |
-| `mcp_servers` | Registered upstream servers | `{ slug: 1 }` (unique), `{ enabled: 1 }`, `{ 'status.state': 1 }` |
-| `tool_catalog` | Synced MCP tool catalog | `{ serverId: 1, name: 1 }` (unique), `{ exposedName: 1 }` (unique), `{ 'approval.status': 1 }`, `{ removedAt: 1 }` |
-| `tool_calls` | Historical audit log of tool calls | `{ ts: 1 }` (TTL 90d), `{ userId: 1, ts: -1 }`, `{ serverSlug: 1, ts: -1 }`, `{ requestId: 1 }` |
-| `admin_events` | Administrative action audit trail | `{ ts: 1 }` (TTL 90d), `{ action: 1, ts: -1 }`, `{ actorId: 1, ts: -1 }` |
+| Collection | Indexes | TTL Configuration | Purpose |
+| :--- | :--- | :--- | :--- |
+| `users` | `_id_`, `email_1` (unique), `status_1` | None | User accounts, roles, Argon2id password hashes |
+| `sessions` | `_id_`, `tokenHash_1` (unique), `expiresAt_1` | `expiresAt: 0s` | Authenticated web session tokens |
+| `api_keys` | `_id_`, `prefix_1`, `keyHash_1` (unique), `ownerId_1_revokedAt_1` | None | Machine API keys for MCP clients |
+| `invites` | `_id_`, `tokenHash_1` (unique), `email_1`, `expiresAt_1` | `expiresAt: 7 days (604800s)` | Single-use team onboarding invites |
+| `mcp_servers` | `_id_`, `slug_1` (unique), `enabled_1` | None | Upstream server configurations & credentials |
+| `tool_catalog` | `_id_`, `exposedName_1` (unique), `serverId_1_name_1` (unique), `approval.status_1` | None | Synchronized tool definitions & hash states |
+| `tool_calls` | `_id_`, `ts_-1`, `userId_1_ts_-1`, `serverSlug_1_ts_-1`, `outcome_1_ts_-1`, `ts_1`, `createdAt_1` | `ts: 90 days (7776000s)` | Immutable tool invocation audit log |
+| `admin_events` | `_id_`, `ts_-1`, `actorId_1_ts_-1`, `action_1_ts_-1` | None (1-year TTL deferred) | Security audit trail for admin actions |
+| `system_state` | `_id_` | None | Migration leases and schema version tracking |
 
 ---
 
 ## 6. Security Controls Status
 
-| Security Control | Status | Implementation Details / File |
-|---|---|---|
-| Argon2id Password Hashing | **IMPLEMENTED** | Memory: 19 MiB, t=2, p=1, constant-time compare (`apps/gateway/src/services/password.ts`) |
-| Login Lockout | **IMPLEMENTED** | Locks account after 10 failed attempts for 15 min (`apps/gateway/src/routes/auth.ts`) |
-| Session Security | **IMPLEMENTED** | Random 256-bit token, SHA-256 hashed at rest, httpOnly SameSite=Lax cookie (`apps/gateway/src/services/sessions.ts`) |
-| CSRF Protection | **IMPLEMENTED** | Double-submit token on state-changing requests, checked via preHandler (`apps/gateway/src/middleware/csrf.ts`) |
-| API Key Scope Isolation | **IMPLEMENTED** | API keys work ONLY on `POST /mcp`; strictly rejected with 401 on all `/api/*` routes (`apps/gateway/src/middleware/authenticator.ts`) |
-| Upstream Credential Encryption | **IMPLEMENTED** | AES-256-GCM, random 96-bit IV, AAD=serverId, Key ring versioning (`apps/gateway/src/registry/crypto.ts`) |
-| Tool Quarantine & Hash Pinning | **IMPLEMENTED** | Tools start pending unless auto-approved; hash change triggers re-approval (`apps/gateway/src/catalog/service.ts`) |
-| Leak Prevention on Tool Resolution | **IMPLEMENTED** | Denied, pending, and unknown tools all return identical `"Unknown tool"` error (`apps/gateway/src/router/tool-router.ts`) |
-| CSV Formula Injection Defense | **IMPLEMENTED** | Prepends single quote `'` if cell starts with `=`, `+`, `-`, `@`, `\t`, `\r` (`apps/gateway/src/audit/redaction.ts`) |
-| Kubernetes Network Isolation | **IMPLEMENTED** | Default-deny NetworkPolicies on all namespaces; strict pod-selector ingress rules (`charts/conduit/templates/netpol.yaml`) |
-| Basic URL Policy | **PARTIAL** | Enforces http/https and blocks embedded credentials (`apps/gateway/src/registry/url-policy.ts`) |
-| Full SSRF Protection (DNS / Private IP block) | **NOT YET** | Spec documented in `SECURITY.md §5`; scheduled for Phase 8 |
-| Granular RBAC Policy Engine | **NOT YET** | Role-based (admin/member) implemented; custom parameter policies scheduled for Phase 8 |
-| Distributed Rate Limiting | **PARTIAL** | Memory rate limiting in place; Redis-backed cluster rate limiting deferred to Phase 8 |
-| Automated Credential Rotation Script | **NOT YET** | Manual key ring versioning supported; automated rotation worker scheduled for Phase 8 |
+| Security Control | Status | Implementation Details |
+| :--- | :--- | :--- |
+| Argon2id Password Hashing | **IMPLEMENTED** | `apps/gateway/src/services/password.ts` (memory: 64 MB, iterations: 3, parallelism: 4) |
+| HMAC-SHA256 API Keys | **IMPLEMENTED** | `apps/gateway/src/services/api-keys.ts` with cluster pepper and constant-time compare |
+| AES-256-GCM Credential Encryption | **IMPLEMENTED** | `apps/gateway/src/registry/crypto.ts` with key rotation and AAD binding |
+| In-Memory CSRF Tokens | **IMPLEMENTED** | `apps/gateway/src/middleware/csrf.ts` & `apps/dashboard/src/api/client.ts` (never in localStorage) |
+| Strict CSP (Nginx) | **IMPLEMENTED** | `apps/dashboard/nginx.conf` (default-src 'self'; script-src 'self'; frame-ancestors 'none') |
+| Dynamic Route Classification Test | **IMPLEMENTED** | `apps/gateway/tests/route-classification.test.ts` verifying 100% of Fastify routes |
+| Tool Quarantine on Hash Change | **IMPLEMENTED** | `apps/gateway/src/catalog/service.ts` (auto-quarantines modified upstream tools) |
+| CSV Injection Neutralization | **IMPLEMENTED** | `apps/gateway/src/audit/redaction.ts:sanitizeCsvCell` (prepends ' to =, +, -, @, \t, \r) |
+| Distributed Migration Lease | **IMPLEMENTED** | `apps/gateway/src/db/migrations/runner.ts` using MongoDB TTL locks |
+| Sensitive Log Redaction | **IMPLEMENTED** | `apps/gateway/src/logger.ts` (redacts authorization, cookie, credential, password, apiKey) |
+| Response Size Cap (1 MB) | **IMPLEMENTED** | `apps/gateway/src/upstream/manager.ts` (aborts and throws `result_too_large` at 1 MB) |
+| Circuit Breaker & Bulkhead | **IMPLEMENTED** | `apps/gateway/src/upstream/manager.ts` (3 failures, 10s-60s backoff, bulkhead 8) |
+| Distributed Rate Limiting | **NOT YET** | `NoopRateLimiter` interface in place; cluster-wide Redis rate limiter deferred to Phase 8 |
+| SSRF Deep IP/DNS Blacklist | **NOT YET** | Format checked by `assertValidServerUrl`; DNS pinning & IP ranges deferred to Phase 8 |
+| Key Rotation Automation Script | **NOT YET** | Multi-key decryption works in code; automated DB re-encryption CLI deferred to Phase 8 |
+| Admin Events 1-Year TTL Index | **NOT YET** | Migration 0003 added tool_calls TTL (90d); admin_events 1-year TTL index deferred |
 
 ---
 
-## 7. Test Suite Summary & Coverage
+## 7. Test Coverage
 
-Total Test Files: **27** | Total Tests: **117** (100% Passing)
+Verified via Vitest test runs:
 
-| Test File | Tests | Coverage Scope |
-|---|---|---|
-| `route-classification.test.ts` | 3 | Introspects Fastify route table: classifies 100% of routes; asserts 401 unauth, 401 API key on `/api/*`, 403 member on admin routes; asserts actorEmail contains `@` for 10 admin actions |
-| `secret-leakage.test.ts` | 1 | Seeds known secrets (woo token, pepper, API key, session id); executes full lifecycle; asserts 0 secrets in response bodies or log lines |
-| `stats-and-tools.test.ts` | 7 | Tests `GET /api/servers/:id/tools` (admin vs member), `POST /api/servers/:id/tools/approve`, `POST /api/servers/test`, `GET /api/config`, canonical `accept-invite`, and `GET /api/stats/servers` aggregation |
-| `mcp-integration.test.ts` | 4 | Multi-instance configVersion convergence, `/mcp` auth enforcement, colliding tool names from separate servers, dead upstream isolation |
-| `integration.test.ts` | 7 | Real MongoDB migrations, bootstrap idempotency, Argon2id verification, lockout after 10 failures, API key lifecycle, multi-tenant isolation |
-| `team-management.test.ts` | 5 | Invite creation, single-use acceptance, self-demote/self-disable/last-admin protection, instant session & key revocation on disable |
-| `route-auth.test.ts` | 20 | Table-driven matrix asserting 401 unauthenticated and 403 member on all admin routes |
-| `circuit-breaker.test.ts` | 7 | State transitions (CLOSED -> OPEN -> HALF_OPEN -> CLOSED), rolling window failure counting, reset timeouts |
-| `graceful-shutdown.test.ts` | 1 | Proves in-flight tool call completes and writes audit record during SIGTERM drain while `/readyz` flips to 503 |
-| `tool-router.test.ts` | 6 | Namespaced routing, quarantine of unapproved tools, result size truncation at 512 KB |
-| `crypto.test.ts` | 5 | AES-256-GCM encryption/decryption, AAD tampering detection, key rotation with multiple key IDs |
-| `audit-sink.test.ts` | 4 | Async bounded queue buffering, batch flushing to MongoDB, drop counter under backpressure |
-| `migration-0002.test.ts` | 2 | Fresh schema application and idempotent upgrade from Phase 3A legacy indexes |
-| `csrf.test.ts` | 5 | Origin matching, valid token acceptance, rejection on missing or mismatched token |
-| `sanitizer.test.ts` | 6 | HTML tag stripping, markdown link escaping, CSV formula injection neutralization |
-| `logger-redaction.test.ts` | 3 | Pino redaction across headers, request bodies, credentials, and parameters |
-| `api-keys.test.ts` | 4 | HMAC-SHA256 generation, verification against pepper, constant-time compare |
-| `password.test.ts` | 3 | Argon2id hash generation, verification, password length validation |
-| `sessions.test.ts` | 3 | Session token generation, SHA-256 hashing, TTL expiration |
-| `roles.test.ts` | 4 | Fastify role guard middleware unit tests |
-| `config.test.ts` | 4 | Configuration parsing, secret validation, encryption key string parsing |
-| `woo-mcp tests` (6 files) | 26 | WooCommerce client REST mapping, product list/create/update, order management, error handling |
+### a) Gateway Tests (20 files, 73 tests passed)
+- `api-keys.test.ts` (2): Key generation, HMAC verification, revocation.
+- `audit-sink.test.ts` (5): Queue buffering, batch inserts, CSV formula sanitization, drop metrics.
+- `circuit-breaker.test.ts` (5): 3-strike trip, backoff recovery, probe in half-open, bulkhead capacity, 1 MB result_too_large check.
+- `config.test.ts` (6): Zod environment validation, hex key parsing, required secrets.
+- `crypto.test.ts` (4): AES-256-GCM encryption/decryption, AAD tampering detection, key rotation.
+- `csrf.test.ts` (2): Double-submit CSRF validation, origin matching.
+- `graceful-shutdown.test.ts` (1): In-flight request completion and audit drain on SIGTERM.
+- `integration.test.ts` (7): Real MongoDB startup, migrations, authentication, account lockout after 10 failures.
+- `logger-redaction.test.ts` (1): Pino log redaction across headers and request bodies.
+- `mcp-integration.test.ts` (4): Streamable HTTP MCP dispatch, configVersion cache invalidation.
+- `migration-0002.test.ts` (2): Migration 0002 idempotency and index repair.
+- `password.test.ts` (2): Argon2id hashing, length validation.
+- `roles.test.ts` (3): Fastify RBAC middleware enforcement.
+- `route-classification.test.ts` (3): Route table classification proof, 401 on API keys on /api/*, 403 on members, real actorEmail validation.
+- `sanitizer.test.ts` (7): Unicode tag & bidi stripping, 1000 char cap, schema depth limit, 64 KB schema size limit, remote $ref rejection, canonical hash stability.
+- `secret-leakage.test.ts` (1): Scans test logs to ensure zero secret leakage.
+- `sessions.test.ts` (3): Session creation, SHA-256 token lookup, expiration.
+- `stats-and-tools.test.ts` (7): Server stats aggregation, tool listing, admin tool approval.
+- `team-management.test.ts` (5): User listing, self-demote & last-admin protections, invite creation & acceptance.
+- `tool-router.test.ts` (3): Tool routing, name translation, quarantine of unapproved tools.
 
-**What is NOT Covered Yet**:
-- Live Redis failover for distributed rate limiting.
-- Full DNS rebinding / SSRF custom dialer tests against AWS/GCP metadata endpoints (Phase 8).
-- High-concurrency cluster load tests (1,000+ simultaneous client SSE streams).
+### b) Woo-MCP Tests (4 files, 17 tests passed)
+- `auth.test.ts` (6): Bearer token validation, unauthorized rejection.
+- `dates.test.ts` (4): ISO 8601 parsing and query parameters.
+- `store-client.test.ts` (5): WooCommerce REST client retries, error handling.
+- `tools.test.ts` (2): Product listing and order lookup tool dispatch.
+
+### c) Dashboard Tests (2 files, 7 tests passed)
+- `client.test.ts` (3): ApiError mapping, CSRF header injection, 401 redirect clearing token.
+- `components.test.tsx` (4): Role-aware layout, write-only server credential input, memory wiping on modal close, plain-text description rendering (no dangerouslySetInnerHTML).
 
 ---
 
-## 8. Known Gaps, Risks, and Open Items
+## 8. Known Gaps & Blunt Risk Assessment
 
-1. **In-Memory Rate Limiting**: The gateway currently applies per-replica memory throttling. In a multi-replica deployment without Redis, a client's request budget is distributed across replicas rather than shared globally.
-2. **SSRF Guard Surface**: The current URL policy validates URL scheme and credentials. Full DNS resolution with private IP filtering (`169.254.169.254`, `10.0.0.0/8`, etc.) is scheduled for Phase 8.
-3. **WordPress Root Process**: The upstream WordPress container starts as root before dropping privileges to `www-data` to bind port 80. While isolated behind default-deny NetworkPolicy, replacing it with `wordpress:fpm` + unprivileged nginx remains a future hardening goal.
-4. **SSE Session Continuity**: The gateway runs MCP in stateless HTTP mode (`sessionIdGenerator: undefined`), which simplifies horizontal scaling behind Kubernetes round-robin but requires clients to re-negotiate if stateful sessions are desired.
+1. **SSRF Guarding is Basic**: `assertValidServerUrl` validates URL syntax, but does not resolve DNS to verify the destination IP is not a cloud metadata service (169.254.169.254) or an internal Kubernetes service. Full DNS-pinned egress proxying is deferred to Phase 8.
+2. **Rate Limiting is Currently No-Op**: In `apps/gateway/src/router/tool-router.ts`, the rate limiter uses `NoopRateLimiter`. True rate limiting requires Redis integration in Phase 8.
+3. **Audit Sink Drops Under Extreme Backpressure**: If MongoDB experiences an extended outage and the in-memory queue exceeds 10,000 items, records are dropped with warning logs. There is no disk spooling or stderr fallback.
+4. **Admin Events Retention**: `admin_events` collection currently lacks a MongoDB TTL index (spec recommends 1 year). Rows persist indefinitely until a cleanup migration is run.
 
 ---
 
 ## 9. How to Run and Demo
 
-### Local Prerequisites
-- WSL 2 (Ubuntu) with Docker Desktop, k3d, kubectl, Helm, Node.js 22+.
-- Add to `/etc/hosts`: `127.0.0.1 gateway.localhost dashboard.localhost conduit.localhost`
+### Prerequisites
+- k3d v5+, kubectl, Docker, Node.js 22, Helm v3.
+- Update `/etc/hosts` (or Windows `hosts`):
+  ```text
+  127.0.0.1 dashboard.localhost gateway.localhost shop.localhost
+  ```
 
-### Execution Commands
+### Commands
 ```bash
-# 1. Start local k3d cluster with Traefik and port mappings
+# 1. Start local k3d cluster with port 80 mapped to Traefik
 make cluster-up
 
-# 2. Generate random local secrets and initialize Kubernetes Secrets
-make secrets
-
-# 3. Build container images and deploy Helm releases to k3d
+# 2. Deploy infrastructure and applications
 make deploy-local
 
-# 4. Verify NetworkPolicy isolation (runs 6-way TCP proofs & negative control)
-./scripts/test-netpol-proof.sh
+# 3. Verify rollout status
+kubectl get pods -A
 
-# 5. Run end-to-end acceptance suite (verifies auth, /mcp tool calls, audit export, cleanup)
+# 4. Run automated E2E Gateway flow
 make e2e-gateway
 
-# 6. Run full unit and integration test suite
-npm test
+# 5. Run automated Playwright UI Smoke test
+make e2e-ui
 ```
 
 ---
 
-## 10. Ten Key Technical Interview Questions & Model Answers
+## 10. Architectural Interview Q&A
 
 1. **How does the Gateway verify API keys on `/mcp` without storing plaintext secrets?**
    API keys use the format `mcpgw_<prefix>_<secret>`. The gateway hashes the secret using HMAC-SHA256 with a cluster pepper (`API_KEY_PEPPER`) and performs a constant-time comparison against `keyHash` in MongoDB, preventing timing attacks and database compromise leakage.
@@ -243,7 +271,7 @@ npm test
    When `ToolRouter` encounters an unapproved tool, a quarantined schema change, or an unauthorized server, it returns an identical `"Unknown tool"` error as if the tool never existed, ensuring no differential timing or error leaks.
 
 4. **How does the Circuit Breaker protect degraded upstreams from cascading failure?**
-   If an upstream fails 5 consecutive requests within a rolling window, the breaker trips to `OPEN`, immediately failing incoming requests with `[gateway:circuit_open]` for 30 seconds without sending any network traffic to the struggling backend until a single probe succeeds in `HALF_OPEN`.
+   If an upstream fails 3 consecutive requests (or 1 probe in half-open), the breaker trips to `open`, failing fast with `[gateway:circuit_open]` (HTTP 503) for 10s doubling up to 60s with +/-20% jitter. In half-open, a single probe is allowed while concurrent calls receive circuit_open.
 
 5. **Why is the database migration runner protected by a distributed lease?**
    Because the gateway is designed to scale horizontally across multiple replicas. A MongoDB TTL-based distributed lock on `system_state._id='migration_lock'` guarantees only one replica executes forward-only migrations at startup while other replicas wait before serving traffic.
@@ -251,14 +279,18 @@ npm test
 6. **How does the Gateway protect CSV audit logs from formula injection (CSV Injection / DDE)?**
    Before rendering any user-controlled string into CSV cells, `sanitizeCsvCell` checks if the string begins with `=`, `+`, `-`, `@`, `\t`, or `\r`. If detected, it prepends a single quote (`'`), neutralizing spreadsheet formula execution.
 
-7. **How does Conduit isolate multi-tenant audit records between team members and administrators?**
+7. **How does Conduit isolate single-organisation audit records between team members and administrators?**
    Audit queries for non-admin members automatically inject `{ userId: principal.userId }` at the database query layer, preventing members from viewing peers' tool executions or argument payloads even with modified query parameters.
 
 8. **What prevents an attacker who discovers an upstream server URL from accessing other cluster services via SSRF?**
-   Upstream URLs are validated by `UrlPolicy`, and the cluster strictly enforces Kubernetes `NetworkPolicy` rules. Even if an admin enters an internal ClusterIP, the gateway pod's egress policy denies connections to all cluster services except designated ports on Mongo and woo-mcp.
+   NetworkPolicy is NOT an SSRF defence; the gateway can reach Mongo:27017 and port 3100 across store namespaces. Currently, `assertValidServerUrl` validates URL syntax; full DNS rebinding and internal IP blacklisting is deferred to Phase 8.
 
 9. **Why does Traefik require custom `ServersTransport` forwarding timeouts for the Gateway Ingress?**
-   MCP uses streamable HTTP and Server-Sent Events (SSE) for tool execution streams that can take 30 to 120 seconds during complex tool operations. Custom `responseHeaderTimeout: 120s` and `readIdleTimeout: 120s` prevent the proxy from prematurely severing long-lived connections.
+   MCP uses streamable HTTP and Server-Sent Events (SSE) for tool execution streams that can take 30 to 120 seconds during complex tool operations. Custom `responseHeaderTimeout: 120s` and `readIdleTimeout: 120s` in Traefik (running in `kube-system`) prevent the proxy from prematurely severing long-lived connections.
 
 10. **How does the system ensure zero secret leakage in logs when upstream credentials or passwords fail?**
     Pino is configured with strict redaction paths covering `authorization`, `cookie`, `credential`, `password`, and `apiKey`. Additionally, `MongoAuditSink` redacts sensitive JSON keys and hashes raw payloads before persistence, verified by automated tests scanning 100% of captured log lines.
+\`;
+
+fs.writeFileSync('/home/karan/conduit/docs/WALKTHROUGH.md', doc, 'utf8');
+console.log('Successfully wrote audited docs/WALKTHROUGH.md');
