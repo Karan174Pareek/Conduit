@@ -40,6 +40,8 @@ export const configSchema = z.object({
     .default('http://store-woocommerce-store-woo-mcp.store-default.svc.cluster.local:3100/mcp'),
   WOO_MCP_BEARER_TOKEN: z.string().optional().default(''),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  METRICS_PORT: z.coerce.number().default(9090),
+  SSRF_ALLOWED_HOSTS: z.string().default('store-woocommerce-store-woo-mcp.store-default.svc.cluster.local'),
 });
 
 export type Config = z.infer<typeof configSchema>;
