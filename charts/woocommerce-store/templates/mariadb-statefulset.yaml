@@ -77,11 +77,20 @@ spec:
               mountPath: /tmp
             - name: run
               mountPath: /run/mysqld
+            {{- if and .Values.backup .Values.backup.enabled }}
+            - name: backup-storage
+              mountPath: /backups
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
         - name: run
           emptyDir: {}
+        {{- if and .Values.backup .Values.backup.enabled }}
+        - name: backup-storage
+          persistentVolumeClaim:
+            claimName: {{ include "woocommerce-store.fullname" . }}-mariadb-backup
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data

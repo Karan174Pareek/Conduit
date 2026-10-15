@@ -1,0 +1,100 @@
+{{- if and .Values.backup .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-mariadb-backup
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mariadb-backup
+spec:
+  schedule: {{ .Values.backup.mariadbSchedule | default "0 3 * * *" | quote }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "woocommerce-store.labels" . | nindent 12 }}
+            app.kubernetes.io/component: mariadb-backup
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: mariadb-dump
+              image: {{ .Values.images.mariadb | default "mariadb:11.4.5" }}
+              imagePullPolicy: {{ .Values.images.pullPolicy | default "IfNotPresent" }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  TIMESTAMP=$(date +%Y%m%d%H%M%S)
+                  BACKUP_FILE="/backups/mariadb-${TIMESTAMP}.sql"
+                  echo "Waiting up to 60s for MariaDB to become reachable (kube-router netpol delay)..."
+                  CONNECTED=0
+                  for i in $(seq 1 30); do
+                    if mariadb-admin -h {{ include "woocommerce-store.fullname" . }}-mariadb \
+                                     -u root \
+                                     -p"$MYSQL_ROOT_PASSWORD" \
+                                     ping >/dev/null 2>&1; then
+                      echo "MariaDB is reachable after attempt ${i}."
+                      CONNECTED=1
+                      break
+                    fi
+                    sleep 2
+                  done
+                  if [ "$CONNECTED" -ne 1 ]; then
+                    echo "ERROR: Timed out waiting for MariaDB connectivity"
+                    exit 1
+                  fi
+                  echo "Starting mariadb-dump to ${BACKUP_FILE}..."
+                  timeout 60 mariadb-dump -h {{ include "woocommerce-store.fullname" . }}-mariadb \
+                               -u root \
+                               -p"$MYSQL_ROOT_PASSWORD" \
+                               --single-transaction \
+                               --quick \
+                               "$MYSQL_DATABASE" > "${BACKUP_FILE}"
+                  echo "Backup successfully completed: $(ls -lh ${BACKUP_FILE})"
+                  # Keep latest 7 backups
+                  ls -t /backups/mariadb-*.sql | tail -n +8 | xargs -r rm --
+                  echo "Retention cleanup complete."
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.existingStoreSecret }}
+                      key: MARIADB_ROOT_PASSWORD
+                - name: MYSQL_DATABASE
+                  value: wordpress
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backups
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: {{ include "woocommerce-store.fullname" . }}-mariadb-backup
+{{- end }}

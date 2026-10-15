@@ -73,6 +73,17 @@ spec:
       ports:
         - protocol: TCP
           port: 3100
+    # Allow MCP requests to demo MCP servers (notes, utils, etc)
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: demo-mcp
+      ports:
+        - protocol: TCP
+          port: 3200
+        - protocol: TCP
+          port: 3201
     # Allow HTTPS egress to internet (Gemini API)
     - to:
         - ipBlock:
@@ -98,12 +109,15 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow MongoDB ONLY from the gateway pod
+    # Allow MongoDB from gateway pod and backup cronjob pod
     - from:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: gateway
               app.kubernetes.io/instance: {{ .Release.Name }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mongodb-backup
       ports:
         - protocol: TCP
           port: 27017
@@ -150,4 +164,41 @@ spec:
         - protocol: TCP
           port: 8080
   egress: [] # Static asset server requires zero egress
+{{- if and .Values.backup .Values.backup.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-mongodb-backup
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb-backup
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mongodb-backup
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "conduit.name" . }}-mongodb
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - protocol: TCP
+          port: 27017
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 {{- end }}
+{{- end }}
+
