@@ -1,0 +1,23 @@
+{{- if and .Values.dashboard .Values.dashboard.pdb .Values.dashboard.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "conduit.fullname" . }}-dashboard
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: dashboard
+    app.kubernetes.io/component: dashboard
+spec:
+  {{- if .Values.dashboard.pdb.minAvailable }}
+  minAvailable: {{ .Values.dashboard.pdb.minAvailable }}
+  {{- else if .Values.dashboard.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.dashboard.pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

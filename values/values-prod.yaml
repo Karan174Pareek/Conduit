@@ -69,3 +69,9 @@ metrics:
 demo:
   rogue:
     enabled: false
+
+backup:
+  enabled: true
+  mongoSchedule: "0 2 * * *"
+  mariadbSchedule: "0 3 * * *"
+

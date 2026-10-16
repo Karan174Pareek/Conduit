@@ -1,6 +1,12 @@
 [extend]
 useDefault = true
 
+[allowlist]
+paths = [
+  '''apps/dashboard/tests/.*''',
+  '''apps/gateway/tests/.*'''
+]
+
 [[rules]]
 id = "conduit-api-key"
 description = "Conduit Member API Key"

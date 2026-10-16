@@ -58,3 +58,7 @@ metrics:
 demo:
   rogue:
     enabled: false
+
+backup:
+  enabled: true
+

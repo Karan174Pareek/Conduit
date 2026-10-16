@@ -1,0 +1,17 @@
+{{- if and .Values.backup .Values.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "conduit.fullname" . }}-mongodb-backup
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb-backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.storage.className | default "local-path" }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.mongodbBackupSize | default "2Gi" }}
+{{- end }}

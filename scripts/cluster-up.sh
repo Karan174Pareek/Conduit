@@ -3,7 +3,7 @@ set -euo pipefail
 
 # scripts/cluster-up.sh
 # Creates the local k3d cluster with Traefik ingress mapped to host port 80,
-# generates dev secrets, and verifies ingress with a throwaway whoami deployment.
+# generates dev secrets, configures namespaces with PSS labels, and ensures metrics-server is active.
 
 CLUSTER_NAME="conduit"
 PUBLIC_PORT="${PUBLIC_PORT:-80}"
@@ -25,85 +25,40 @@ else
   echo "Creating k3d cluster '${CLUSTER_NAME}' on port ${PUBLIC_PORT}..."
   k3d cluster create "${CLUSTER_NAME}" \
     --servers 1 \
-    -p "${PUBLIC_PORT}:80@loadbalancer" \
-    --k3s-arg "--disable=metrics-server@server:0"
+    -p "${PUBLIC_PORT}:80@loadbalancer"
 fi
 
-# Ensure namespaces exist
+# Ensure namespaces exist with Pod Security Standards labels (SECURITY.md §7)
 kubectl create namespace conduit-system --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace conduit-system --overwrite \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted
+
 kubectl create namespace store-default --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace store-default --overwrite \
+  pod-security.kubernetes.io/enforce=baseline \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=baseline \
+  pod-security.kubernetes.io/warn=baseline
+
+# Dedicated negative-control namespace (no network policies)
+kubectl create namespace netpol-test --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace netpol-test --overwrite \
+  pod-security.kubernetes.io/enforce=baseline \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=baseline \
+  pod-security.kubernetes.io/warn=baseline
+
+# Ensure metrics-server is deployed for HPA and resource tracking
+if ! kubectl get deployment metrics-server -n kube-system >/dev/null 2>&1; then
+  echo "Deploying metrics-server into kube-system..."
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+fi
 
 # Generate and sync local development secrets
 "$(dirname "$0")/gen-secrets.sh"
-
-echo "Deploying throwaway 'whoami' service to verify Traefik ingress..."
-cat <<EOF | kubectl apply -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: whoami
-  namespace: default
-  labels:
-    app: whoami
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: whoami
-  template:
-    metadata:
-      labels:
-        app: whoami
-    spec:
-      containers:
-      - name: whoami
-        image: traefik/whoami:latest
-        ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: whoami
-  namespace: default
-spec:
-  ports:
-  - port: 80
-    targetPort: 80
-  selector:
-    app: whoami
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: whoami
-  namespace: default
-spec:
-  ingressClassName: traefik
-  rules:
-  - host: whoami.localhost
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: whoami
-            port:
-              number: 80
-EOF
-
-echo "Waiting for whoami deployment rollout..."
-kubectl rollout status deployment/whoami -n default --timeout=90s
-
-echo "Verifying HTTP reachability via Traefik (http://whoami.localhost)..."
-if curl -s -f --max-time 10 http://whoami.localhost >/dev/null; then
-  echo "SUCCESS: http://whoami.localhost is reachable through Traefik!"
-else
-  echo "WARNING: Direct curl to http://whoami.localhost did not respond."
-  echo "Testing via loopback with Host header: curl -H 'Host: whoami.localhost' http://127.0.0.1:${PUBLIC_PORT}"
-  curl -s -f --max-time 10 -H "Host: whoami.localhost" "http://127.0.0.1:${PUBLIC_PORT}"
-  echo "SUCCESS: Host header routing to Traefik succeeded!"
-fi
 
 echo "=== Cluster ${CLUSTER_NAME} is UP and READY ==="

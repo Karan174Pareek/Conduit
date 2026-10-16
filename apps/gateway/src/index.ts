@@ -5,6 +5,7 @@ import { runMigrations } from './db/migrations/runner.js';
 import { bootstrapAdmin } from './services/bootstrap.js';
 import { seedDefaultServers } from './registry/seed.js';
 import { buildApp } from './app.js';
+import { startMetricsServer } from './metrics.js';
 import type { UpstreamManager } from './upstream/manager.js';
 import type { CredentialCrypto } from './registry/crypto.js';
 import type { SystemStateDocument } from './db/types.js';
@@ -64,6 +65,20 @@ async function main() {
     }
   }, 5000);
 
+  // 7. Start Prometheus metrics server on dedicated internal port (not reachable via Ingress)
+  let metricsHandle: { close: () => Promise<void> } | null = null;
+  try {
+    metricsHandle = await startMetricsServer(
+      config.METRICS_PORT,
+      config.HOST,
+      () => upstreamManager,
+      () => (app as any).auditSink,
+      app.log,
+    );
+  } catch (err) {
+    app.log.error({ err }, 'Failed to start Prometheus metrics server');
+  }
+
   // Graceful shutdown handling
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
@@ -72,6 +87,15 @@ async function main() {
 
     clearInterval(configConvergenceTimer);
     upstreamManager.stopBackgroundLoops();
+
+    if (metricsHandle) {
+      try {
+        await metricsHandle.close();
+        logger.info('Prometheus metrics server closed');
+      } catch (err) {
+        logger.warn({ err }, 'Error closing metrics server');
+      }
+    }
 
     try {
       await app.close();
