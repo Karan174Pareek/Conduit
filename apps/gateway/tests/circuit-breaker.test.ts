@@ -120,6 +120,17 @@ describe('Circuit Breaker & Bulkhead State Machine', () => {
     expect(state.breaker.consecutiveFailures).toBe(0);
   });
 
+  it('aborts and returns result_too_large when response exceeds MAX_RESULT_BYTES_RESULT (1 MB)', async () => {
+    const hugeString = 'x'.repeat(1024 * 1024 + 10);
+    const mockClient = {
+      callTool: vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: hugeString }],
+      }),
+    } as any;
+    vi.spyOn(manager, 'getOrCreateClient').mockResolvedValue(mockClient);
+
+    await expect(manager.invokeTool('test-upstream', 'ping', {})).rejects.toThrow('result_too_large');
+  });
   it('enforces bulkhead concurrency limit and fails fast with upstream_busy when full', async () => {
     const state = manager.getServerState('test-upstream')!;
     // Simulate 2 calls already in flight (maxConcurrent = 2)

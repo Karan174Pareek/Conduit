@@ -6,7 +6,7 @@ import type { Config } from '../config.js';
 import { requireAuth } from '../middleware/authenticator.js';
 import { requireRole } from '../middleware/roles.js';
 import { hashPassword } from '../services/password.js';
-import type { InviteDocument, UserDocument, AdminEventDocument } from '../db/types.js';
+import { toObjectId, type InviteDocument, type UserDocument, type AdminEventDocument } from '../db/types.js';
 
 export interface InviteRouteOptions {
   db: Db;
@@ -84,7 +84,7 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     await db.collection<AdminEventDocument>('admin_events').insertOne({
       ts: now,
       actorId: principal.userId,
-      actorEmail: (request as any).user?.email ?? principal.userId,
+      actorEmail: principal.email ?? 'admin@conduit.localhost',
       action: 'user.invite',
       target: { type: 'invite', id: inserted.insertedId.toString(), label: body.email },
       details: { email: body.email, role: body.role, expiresAt },
@@ -96,11 +96,58 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
       role: body.role,
       token: rawToken,
       expiresAt,
+      invite: {
+        id: inserted.insertedId.toString(),
+        email: body.email,
+        role: body.role,
+        token: rawToken,
+        expiresAt,
+      },
     });
   });
 
-  // 2. POST /api/invites/accept - Single-use acceptance with Argon2id password hashing
-  fastify.post('/invites/accept', async (request, reply) => {
+  // 2. GET /api/invites - List active pending invites (admin only)
+  fastify.get('/invites', { preHandler: [requireAuth(db, config), requireRole('admin', db)] }, async (_request, reply) => {
+    const invites = await db
+      .collection<InviteDocument>('invites')
+      .find({ usedAt: null, expiresAt: { $gt: new Date() } })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    reply.send({
+      invites: invites.map((inv) => ({
+        id: inv._id?.toString(),
+        email: inv.email,
+        role: inv.role,
+        expiresAt: inv.expiresAt,
+        createdAt: inv.createdAt,
+      })),
+    });
+  });
+
+  // 3. DELETE /api/invites/:id - Revoke invite (admin only)
+  fastify.delete('/invites/:id', { preHandler: [requireAuth(db, config), requireRole('admin', db)] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const objId = toObjectId(id);
+    if (!objId) {
+      reply.status(400).send({ error: 'Bad Request', message: 'Invalid invite ID' });
+      return;
+    }
+
+    const invite = await db.collection<InviteDocument>('invites').findOne({ _id: objId });
+    if (!invite) {
+      reply.status(404).send({ error: 'Not Found', message: 'Invite not found' });
+      return;
+    }
+
+    await db.collection<InviteDocument>('invites').deleteOne({ _id: objId });
+    await db.collection<UserDocument>('users').deleteOne({ email: invite.email, status: 'invited' });
+
+    reply.send({ ok: true, deletedId: id });
+  });
+
+  // 4. POST /api/invites/accept and /api/auth/accept-invite
+  const acceptHandler = async (request: any, reply: any) => {
     const body = acceptInviteSchema.parse(request.body);
     const tokenHash = crypto.createHash('sha256').update(body.token).digest('hex');
 
@@ -130,7 +177,7 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
     if (updateResult.modifiedCount === 0) {
       reply.status(400).send({
         error: 'Bad Request',
-        message: 'Invite token has already been used',
+        message: 'Invalid or expired invite token',
       });
       return;
     }
@@ -170,5 +217,8 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
       message: 'Invite accepted successfully',
       email: invite.email,
     });
-  });
+  };
+
+  // Canonical invite accept route (no alias)
+  fastify.post('/auth/accept-invite', acceptHandler);
 };

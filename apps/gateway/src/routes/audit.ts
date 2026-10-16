@@ -178,7 +178,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (
   });
 
   // 3. GET /api/admin-events - Admin activity audit log
-  fastify.get('/admin-events', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  fastify.get('/admin-events', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (request, reply) => {
     const query = adminEventsQuerySchema.parse(request.query);
     const filter: Filter<AdminEventDocument> = {};
 
@@ -214,38 +214,96 @@ export const auditRoutes: FastifyPluginAsync<AuditRouteOptions> = async (
     });
   });
 
-  // 4. GET /api/stats/servers - Aggregated server call metrics over the last 24h
-  fastify.get('/stats/servers', { preHandler: [requireAuth(db, config)] }, async (_request, reply) => {
+  // 4. GET /api/config - Public application configuration endpoint (no secrets)
+  fastify.get('/config', async (_request, reply) => {
+    return reply.status(200).send({
+      publicGatewayUrl: config.PUBLIC_GATEWAY_URL,
+      publicDashboardUrl: config.PUBLIC_DASHBOARD_URL,
+      version: '0.1.0',
+    });
+  });
+
+  // 5. GET /api/stats/servers - Aggregated server call metrics over the last 24h
+  fastify.get('/stats/servers', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (_request, reply) => {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
     const pipeline = [
       { $match: { ts: { $gte: since } } },
+      { $sort: { ts: -1 } },
       {
         $group: {
           _id: '$serverSlug',
-          totalCalls: { $sum: 1 },
-          errorCalls: {
+          totalCalls24h: { $sum: 1 },
+          errorCalls24h: {
             $sum: {
-              $cond: [{ $in: ['$outcome', ['error', 'timeout', 'unreachable']] }, 1, 0],
+              $cond: [{ $in: ['$outcome', ['error', 'timeout', 'unreachable', 'denied']] }, 1, 0],
             },
           },
-          avgDurationMs: { $avg: '$durationMs' },
+          durations: { $push: '$durationMs' },
+          errors: {
+            $push: {
+              $cond: [
+                { $in: ['$outcome', ['error', 'timeout', 'unreachable', 'denied']] },
+                { code: { $ifNull: ['$errorCode', 'error'] }, at: '$ts' },
+                '$$REMOVE',
+              ],
+            },
+          },
+          successes: {
+            $push: {
+              $cond: [{ $eq: ['$outcome', 'success'] }, '$ts', '$$REMOVE'],
+            },
+          },
         },
       },
     ];
 
+    interface ServerAggResult {
+      _id: string;
+      totalCalls24h: number;
+      errorCalls24h: number;
+      durations: number[];
+      errors: Array<{ code: string; at: Date }>;
+      successes: Date[];
+    }
+
     const results = await db
       .collection<ToolCallDocument>('tool_calls')
-      .aggregate(pipeline)
+      .aggregate<ServerAggResult>(pipeline)
       .toArray();
 
-    const stats = results.map((r) => ({
-      serverSlug: r._id as string,
-      totalCalls: r.totalCalls as number,
-      errorCalls: r.errorCalls as number,
-      successCalls: (r.totalCalls as number) - (r.errorCalls as number),
-      avgDurationMs: Math.round((r.avgDurationMs as number) || 0),
-    }));
+    const stats = results.map((r: ServerAggResult) => {
+      const totalCalls24h = r.totalCalls24h as number;
+      const errorCalls24h = r.errorCalls24h as number;
+      const errorRate24h = totalCalls24h > 0 ? Number((errorCalls24h / totalCalls24h).toFixed(4)) : 0;
+
+      const rawDurations: number[] = Array.isArray(r.durations) ? r.durations : [];
+      const sortedDurations = [...rawDurations].sort((a, b) => a - b);
+      let p50 = 0;
+      let p95 = 0;
+      if (sortedDurations.length > 0) {
+        const idx50 = Math.min(Math.floor(sortedDurations.length * 0.50), sortedDurations.length - 1);
+        const idx95 = Math.min(Math.floor(sortedDurations.length * 0.95), sortedDurations.length - 1);
+        p50 = sortedDurations[idx50] ?? 0;
+        p95 = sortedDurations[idx95] ?? 0;
+      }
+
+      const rawErrors: Array<{ code: string; at: Date }> = Array.isArray(r.errors) ? r.errors : [];
+      const lastError = rawErrors.length > 0 ? rawErrors[0] : null;
+
+      const rawSuccesses: Date[] = Array.isArray(r.successes) ? r.successes : [];
+      const lastSuccessAt = rawSuccesses.length > 0 ? rawSuccesses[0] : null;
+
+      return {
+        serverSlug: r._id as string,
+        totalCalls24h,
+        errorRate24h,
+        p50,
+        p95,
+        lastError,
+        lastSuccessAt,
+      };
+    });
 
     reply.send({ stats });
   });

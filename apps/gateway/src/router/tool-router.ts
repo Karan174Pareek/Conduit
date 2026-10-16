@@ -4,9 +4,11 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { ToolCatalogDocument } from '../db/types.js';
 import type { UpstreamManager } from '../upstream/manager.js';
 import type { ToolInvocationResult } from '../upstream/types.js';
+import { toolCallsCounter, errorsCounter, toolLatencyHistogram } from '../metrics.js';
 
 export interface Principal {
   userId: string;
+  email?: string;
   role: 'admin' | 'member';
   via: 'apikey' | 'session';
   keyId?: string | null;
@@ -153,6 +155,8 @@ export class ToolRouter {
     const parsed = parseExposedToolName(exposedName);
 
     if (!parsed) {
+      toolCallsCounter.inc({ server: 'unknown', tool: exposedName, status: 'invalid' });
+      errorsCounter.inc({ type: 'invalid', server: 'unknown' });
       await this.auditSink.record({
         principal,
         serverSlug: 'unknown',
@@ -170,6 +174,8 @@ export class ToolRouter {
     const serverState = this.upstreamManager.getServerState(slug);
 
     if (!serverState || !serverState.server.enabled) {
+      toolCallsCounter.inc({ server: slug, tool: toolPart, status: 'denied' });
+      errorsCounter.inc({ type: 'server_disabled', server: slug });
       await this.auditSink.record({
         principal,
         serverSlug: slug,
@@ -190,6 +196,8 @@ export class ToolRouter {
 
     if (!catalogItem || catalogItem.approval.status !== 'approved') {
       const outcome = catalogItem?.approval.status === 'changed' ? 'quarantined' : 'denied';
+      toolCallsCounter.inc({ server: slug, tool: toolPart, status: outcome });
+      errorsCounter.inc({ type: outcome, server: slug });
       await this.auditSink.record({
         principal,
         serverSlug: slug,
@@ -205,6 +213,8 @@ export class ToolRouter {
     // Policy check
     const allowed = await this.policyEngine.evaluate(principal, slug, catalogItem.name);
     if (!allowed) {
+      toolCallsCounter.inc({ server: slug, tool: catalogItem.name, status: 'denied' });
+      errorsCounter.inc({ type: 'policy_denied', server: slug });
       await this.auditSink.record({
         principal,
         serverSlug: slug,
@@ -219,6 +229,8 @@ export class ToolRouter {
     // Rate limiter check
     const rateLimit = await this.rateLimiter.consume(`user:${principal.userId}`);
     if (!rateLimit.allowed) {
+      toolCallsCounter.inc({ server: slug, tool: catalogItem.name, status: 'rate_limited' });
+      errorsCounter.inc({ type: 'rate_limited', server: slug });
       await this.auditSink.record({
         principal,
         serverSlug: slug,
@@ -238,7 +250,15 @@ export class ToolRouter {
         { deadlineMs: ctx.deadlineMs },
       );
 
+      const durationMs = Date.now() - startTime;
       const resultBytes = result?.content ? JSON.stringify(result.content).length : 0;
+      const outcome = result.isError ? 'error' : 'success';
+
+      toolCallsCounter.inc({ server: slug, tool: catalogItem.name, status: outcome });
+      toolLatencyHistogram.observe({ server: slug, tool: catalogItem.name }, durationMs / 1000);
+      if (result.isError) {
+        errorsCounter.inc({ type: 'upstream_error', server: slug });
+      }
 
       await this.auditSink.record({
         principal,
@@ -248,13 +268,13 @@ export class ToolRouter {
         exposedName,
         args,
         resultBytes,
-        durationMs: Date.now() - startTime,
-        outcome: result.isError ? 'error' : 'success',
+        durationMs,
+        outcome,
         upstreamIsError: result.isError,
       });
 
       this.logger?.debug(
-        { exposedName, slug, durationMs: Date.now() - startTime, isError: result.isError },
+        { exposedName, slug, durationMs, isError: result.isError },
         'Tool call finished',
       );
 
@@ -262,6 +282,11 @@ export class ToolRouter {
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const errMsg = err instanceof Error ? err.message : String(err);
+      const outcome = errMsg.includes('timeout') ? 'timeout' : 'error';
+
+      toolCallsCounter.inc({ server: slug, tool: catalogItem.name, status: outcome });
+      toolLatencyHistogram.observe({ server: slug, tool: catalogItem.name }, durationMs / 1000);
+      errorsCounter.inc({ type: outcome, server: slug });
 
       await this.auditSink.record({
         principal,
@@ -271,7 +296,7 @@ export class ToolRouter {
         exposedName,
         args,
         durationMs,
-        outcome: errMsg.includes('timeout') ? 'timeout' : 'error',
+        outcome,
         errorMessage: errMsg,
       });
 

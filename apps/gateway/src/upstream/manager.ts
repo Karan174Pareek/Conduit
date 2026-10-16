@@ -426,6 +426,13 @@ export class UpstreamManager {
       state.client = null;
       state.transport = null;
     }
+
+    void this.persistServerStatus(
+      state,
+      'unreachable',
+      code,
+      this.scrub(rawMessage, state.decryptedCredential),
+    );
   }
 
   private mapUpstreamError(state: UpstreamServerState, err: unknown): ConduitError {

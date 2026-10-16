@@ -319,20 +319,21 @@ Plain config (ConfigMap): `PUBLIC_DASHBOARD_URL`, `PUBLIC_GATEWAY_URL`, `ALLOWED
 
 ## 11. Gateway REST API (dashboard)
 
-All under `/api`, JSON, session cookie + `x-csrf-token` on mutations, `x-request-id` echoed.
+All under `/api`, JSON, session cookie required (+ `x-csrf-token` on mutations), `x-request-id` echoed. API keys work ONLY on `POST /mcp`; any API key (member or admin) on any `/api/*` endpoint returns 401.
 
-| Area | Endpoints | Role |
+| Area | Endpoints | Auth & Role Requirements |
 |---|---|---|
-| Auth | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/accept-invite` | any |
-| Users | `GET /users`, `POST /invites`, `PATCH /users/:id` (role, disable) | admin |
-| Keys | `GET /keys` (own; admin: all), `POST /keys`, `DELETE /keys/:id` (own; admin: any) | member/admin |
-| Servers | `GET /servers`, `POST /servers`, `PATCH /servers/:id`, `DELETE /servers/:id`, `POST /servers/test`, `GET /servers/:id/tools`, `POST /servers/:id/tools/approve` | admin (GET: member sees name, status, tools only) |
-| Policies | `GET/PUT /policies` | admin |
-| Audit | `GET /audit` (own for members; all for admin), `GET /audit/export.csv`, `GET /admin-events` | member/admin |
-| Chat | `POST /chat` (SSE), `GET /conversations`, `GET /conversations/:id`, `DELETE /conversations/:id` | member/admin |
-| Stats | `GET /stats/servers` | admin |
-| Stores (bonus) | `GET/POST/DELETE /stores` | member (own) / admin |
-| Ops | `GET /healthz`, `GET /readyz`; `:9090/metrics` (internal only) | – |
+| Auth | `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/accept-invite` | Public for login & accept-invite (single-use token). Session cookie required for `GET /me` and `POST /logout` (API key returns 401). |
+| Users | `GET /api/users`, `POST /api/invites`, `PATCH /api/users/:id` (role, disable) | Admin only (session cookie required; self-demote and last-admin protected; API key returns 401) |
+| Keys | `GET /api/keys` (own; admin: all), `POST /api/keys`, `DELETE /api/keys/:id` (own; admin: any) | Member / Admin (session cookie + x-csrf-token; API key returns 401) |
+| Servers | `GET /api/servers`, `POST /api/servers`, `PATCH /api/servers/:id`, `DELETE /api/servers/:id`, `POST /api/servers/test`, `GET /api/servers/:id/tools`, `POST /api/servers/:id/tools/approve` | Admin only (except `GET /servers` and `GET /servers/:id/tools`: member sees reduced view with status & approved tools only, no URL and no auth; API key returns 401) |
+| Config | `GET /api/config` | Public (returns `{publicGatewayUrl, publicDashboardUrl, version}`, no secrets) |
+| Policies | `GET/PUT /api/policies` | Admin only (Phase 8) |
+| Audit | `GET /api/audit` (own for members; all for admin), `GET /api/audit/export.csv`, `GET /api/admin-events` | Member / Admin (admin-events: admin only; CSV export: formula injection protected; API key returns 401) |
+| Chat | `POST /api/chat` (SSE), `GET /api/conversations`, `GET /api/conversations/:id`, `DELETE /api/conversations/:id` | Member / Admin (Phase 5) |
+| Stats | `GET /api/stats/servers` | Admin only (24h aggregated tool calls, errorRate24h, p50, p95 durations, lastError, lastSuccessAt; API key returns 401) |
+| Ops | `GET /healthz`, `GET /readyz` | Public (readyz gates on DB migrations & flips to 503 during graceful shutdown) |
+| MCP Front Door | `POST /mcp` (Streamable HTTP / JSON-RPC 2.0) | API key only (session cookie rejected; 401 on disabled user or revoked key) |
 
 ## 12. Observability
 

@@ -133,8 +133,8 @@ export const userRoutes: FastifyPluginAsync<UserRouteOptions> = async (
     await db.collection<AdminEventDocument>('admin_events').insertOne({
       ts: now,
       actorId: principal.userId,
-      actorEmail: (request as any).user?.email ?? principal.userId,
-      action: body.status === 'disabled' ? 'user.disable' : 'user.update',
+      actorEmail: principal.email ?? 'admin@conduit.localhost',
+      action: body.status === 'disabled' ? 'user.disable' : body.role ? 'user.role_change' : 'user.update',
       target: { type: 'user', id: targetUser._id.toString(), label: targetUser.email },
       details: { role: body.role, status: body.status },
     });

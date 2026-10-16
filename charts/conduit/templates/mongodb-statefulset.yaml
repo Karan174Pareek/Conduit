@@ -123,6 +123,10 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
             - name: tmp
               mountPath: /tmp
+            {{- if and .Values.backup .Values.backup.enabled }}
+            - name: backup-storage
+              mountPath: /backups
+            {{- end }}
       volumes:
         - name: init-scripts
           configMap:
@@ -132,6 +136,11 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.backup .Values.backup.enabled }}
+        - name: backup-storage
+          persistentVolumeClaim:
+            claimName: {{ include "conduit.fullname" . }}-mongodb-backup
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: mongodb-data

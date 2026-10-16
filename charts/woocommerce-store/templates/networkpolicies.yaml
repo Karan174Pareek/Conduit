@@ -26,11 +26,14 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # Allow MySQL from WordPress, setup-job, and store pods
+    # Allow MySQL from WordPress, setup-job, store pods, and backup cronjob
     - from:
         - podSelector:
             matchLabels:
               {{- include "woocommerce-store.selectorLabels" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: mariadb-backup
       ports:
         - protocol: TCP
           port: 3306
@@ -146,4 +149,40 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+{{- if and .Values.backup .Values.backup.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce-store.fullname" . }}-mariadb-backup
+  labels:
+    {{- include "woocommerce-store.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mariadb-backup
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: mariadb-backup
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce-store.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: mariadb
+      ports:
+        - protocol: TCP
+          port: 3306
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 {{- end }}
+{{- end }}
+

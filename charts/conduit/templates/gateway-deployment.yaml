@@ -46,6 +46,9 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
           lifecycle:
             preStop:
               exec:
