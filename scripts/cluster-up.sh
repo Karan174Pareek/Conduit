@@ -54,7 +54,8 @@ kubectl label namespace netpol-test --overwrite \
 # Ensure metrics-server is deployed for HPA and resource tracking
 if ! kubectl get deployment metrics-server -n kube-system >/dev/null 2>&1; then
   echo "Deploying metrics-server into kube-system..."
-  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.7.2/components.yaml
+  # Note: --kubelet-insecure-tls is strictly local-only for k3d self-signed kubelet certs; omit in production
   kubectl patch deployment metrics-server -n kube-system --type='json' -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 fi
 
