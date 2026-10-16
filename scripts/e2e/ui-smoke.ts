@@ -1,11 +1,39 @@
 import { chromium, type ConsoleMessage } from 'playwright';
 import { execSync } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 
 // Clean helper to run commands without printing output or secrets
 function execQuiet(cmd: string): string {
   return execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+}
+
+function callMcpEndpoint(secretKey: string, payload: Record<string, unknown>): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const req = http.request(
+      'http://127.0.0.1/mcp',
+      {
+        method: 'POST',
+        headers: {
+          host: 'gateway.localhost',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${secretKey}`,
+          'content-length': Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 500, text: body }));
+      }
+    );
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
 }
 
 async function runUiSmoke() {
@@ -26,7 +54,7 @@ async function runUiSmoke() {
       "kubectl get secret conduit-secrets -n conduit-system -o jsonpath='{.data.MONGO_PASSWORD}' | base64 -d"
     );
   } catch (err) {
-    console.error('Failed to retrieve credentials from cluster secret');
+    console.error('Failed to read secrets from Kubernetes:', err);
     process.exit(1);
   }
 
@@ -34,20 +62,13 @@ async function runUiSmoke() {
   const memberEmail = `e2e-member-${Date.now()}@conduit.localhost`;
   const memberPassword = 'MemberPassword123!';
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 800 },
-  });
-
+  // 3. Launch browser and attach CSP violation monitor
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext();
   const page = await context.newPage();
 
-  // Track CSP violations
   const cspViolations: string[] = [];
-  page.on('pageerror', (err) => console.error('[PAGE ERROR]:', err)); page.on('console', (msg: ConsoleMessage) => { console.log('[PAGE LOG ' + msg.type() + ']:', msg.text());
+  page.on('console', (msg: ConsoleMessage) => {
     const text = msg.text();
     if (
       text.toLowerCase().includes('content security policy') ||
@@ -139,28 +160,20 @@ async function runUiSmoke() {
 
     // Step 6: Tool call via MCP endpoint with API Key
     console.log('[6/7] Invoking MCP tool call with generated API key...');
-    const mcpRes = await fetch('http://gateway.localhost/mcp', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${secretKey}`,
+    const mcpRes = await callMcpEndpoint(secretKey, {
+      jsonrpc: '2.0',
+      id: 'ui-smoke-1',
+      method: 'tools/call',
+      params: {
+        name: 'woo__list_products',
+        arguments: { per_page: 5 },
       },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'ui-smoke-1',
-        method: 'tools/call',
-        params: {
-          name: 'woo__list_products',
-          arguments: { per_page: 5 },
-        },
-      }),
     });
 
-    if (!mcpRes.ok) {
+    if (mcpRes.status < 200 || mcpRes.status >= 300) {
       throw new Error(`MCP tool call failed with status ${mcpRes.status}`);
     }
-    const rawText = await mcpRes.text();
+    const rawText = mcpRes.text;
     const dataLine = rawText.split('\n').find((l) => l.startsWith('data: ')) || rawText;
     const mcpData: any = JSON.parse(dataLine.replace(/^data: /, ''));
     if (mcpData.result?.isError) {
@@ -190,19 +203,11 @@ async function runUiSmoke() {
     await page.waitForSelector('text=Revoked', { timeout: 10000 });
 
     // Assert immediate next call returns 401 Unauthorized
-    const revokedRes = await fetch('http://gateway.localhost/mcp', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${secretKey}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 'ui-smoke-2',
-        method: 'tools/call',
-        params: { name: 'woo__list_products', arguments: {} },
-      }),
+    const revokedRes = await callMcpEndpoint(secretKey, {
+      jsonrpc: '2.0',
+      id: 'ui-smoke-2',
+      method: 'tools/call',
+      params: { name: 'woo__list_products', arguments: {} },
     });
 
     if (revokedRes.status !== 401) {
