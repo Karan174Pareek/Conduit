@@ -12,12 +12,17 @@ import { mcpRoutes } from './routes/mcp.js';
 import { auditRoutes } from './routes/audit.js';
 import { inviteRoutes } from './routes/invites.js';
 import { userRoutes } from './routes/users.js';
+import { chatRoutes } from './routes/chat.js';
 import { csrfProtection } from './middleware/csrf.js';
 import { CredentialCrypto } from './registry/crypto.js';
 import { CatalogService } from './catalog/service.js';
 import { UpstreamManager } from './upstream/manager.js';
 import { ToolRouter } from './router/tool-router.js';
 import { MongoAuditSink } from './audit/sink.js';
+import { ChatService } from './chat/service.js';
+import { GeminiLlmClient } from './chat/gemini-client.js';
+import { FakeLlmClient } from './chat/fake-client.js';
+import type { LlmClient } from './chat/types.js';
 
 export interface AppDependencies {
   crypto?: CredentialCrypto;
@@ -25,6 +30,8 @@ export interface AppDependencies {
   upstreamManager?: UpstreamManager;
   toolRouter?: ToolRouter;
   auditSink?: MongoAuditSink;
+  chatService?: ChatService;
+  llmClient?: LlmClient;
   isReady?: () => boolean;
   loggerInstance?: FastifyBaseLogger;
 }
@@ -75,12 +82,29 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   const auditSink = deps.auditSink ?? new MongoAuditSink(db, app.log);
   const toolRouter = deps.toolRouter ?? new ToolRouter(db, upstreamManager, undefined, undefined, auditSink, app.log);
 
+  // Initialize ChatService
+  let chatService = deps.chatService;
+  if (!chatService) {
+    let llmClient = deps.llmClient;
+    if (!llmClient) {
+      if (process.env.CONDUIT_CHAT_FAKE_LLM === 'true') {
+        llmClient = new FakeLlmClient();
+      } else if (config.GEMINI_API_KEY) {
+        llmClient = new GeminiLlmClient(config.GEMINI_API_KEY, config.GEMINI_MODEL);
+      }
+    }
+    if (llmClient) {
+      chatService = new ChatService(db, toolRouter, llmClient);
+    }
+  }
+
   // Attach to fastify instance for testing / lifecycle management
   (app as any).upstreamManager = upstreamManager;
   (app as any).toolRouter = toolRouter;
   (app as any).catalogService = catalogService;
   (app as any).crypto = credCrypto;
   (app as any).auditSink = auditSink;
+  (app as any).chatService = chatService;
 
   // Health and probe routes
   app.register(healthRoutes(db, deps.isReady));
@@ -99,6 +123,7 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   app.register(auditRoutes, { db, config, prefix: '/api' });
   app.register(inviteRoutes, { db, config, prefix: '/api' });
   app.register(userRoutes, { db, config, prefix: '/api' });
+  app.register(chatRoutes, { db, config, chatService, prefix: '/api' });
 
   // MCP front door
   app.register(mcpRoutes, { db, config, toolRouter });

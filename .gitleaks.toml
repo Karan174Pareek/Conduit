@@ -2,19 +2,19 @@
 useDefault = true
 
 [allowlist]
-paths = [
-  '''apps/dashboard/tests/.*''',
-  '''apps/gateway/tests/.*'''
+regexes = [
+  'mcpgw_a1b2c3d4_SUPER_SECRET_TOKEN_DO_NOT_LEAK',
+  'mcpgw_12345678_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'
 ]
 
 [[rules]]
-id = "conduit-api-key"
-description = "Conduit Member API Key"
-regex = '''mcpgw_[a-zA-Z0-9_-]{16,}'''
-tags = ["key", "conduit"]
+id = 'conduit-api-key'
+description = 'Conduit Member API Key'
+regex = 'mcpgw_[a-zA-Z0-9_-]{16,}'
+tags = ['key', 'conduit']
 
 [[rules]]
-id = "conduit-enc-key"
-description = "Conduit Credential Encryption Key"
-regex = '''kid\d+:[A-Za-z0-9+/]{32,}={0,2}'''
-tags = ["encryption", "conduit"]
+id = 'conduit-enc-key'
+description = 'Conduit Credential Encryption Key'
+regex = 'kid\d+:[A-Za-z0-9+/]{32,}={0,2}'
+tags = ['encryption', 'conduit']

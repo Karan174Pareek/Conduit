@@ -12,6 +12,7 @@ import { ApiKeysPage } from './pages/ApiKeysPage';
 import { AuditPage } from './pages/AuditPage';
 import { TeamPage } from './pages/TeamPage';
 import { ConnectPage } from './pages/ConnectPage';
+import { ChatPage } from './pages/ChatPage';
 import { ForbiddenPage } from './pages/ForbiddenPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
                     }
                   />
                   <Route path="connect" element={<ConnectPage />} />
+                  <Route path="chat" element={<ChatPage />} />
                   <Route path="403" element={<ForbiddenPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

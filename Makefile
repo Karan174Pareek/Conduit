@@ -21,6 +21,7 @@ help:
 	@echo "  make e2e             - Run all unit and integration tests"
 	@echo "  make e2e-gateway     - Run Gateway MCP E2E test suite"
 	@echo "  make e2e-ui          - Run Phase 4 Dashboard Playwright smoke test"
+	@echo "  make e2e-dod         - Run Definition of Done verification suite"
 
 .PHONY: cluster-up
 cluster-up:
@@ -99,6 +100,7 @@ load:
 	k3d image import conduit/woo-mcp:$(GIT_SHA) conduit/woo-mcp:latest -c conduit
 	k3d image import conduit/gateway:$(GIT_SHA) conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
 	k3d image import conduit/dashboard:$(GIT_SHA) conduit/dashboard:latest conduit/dashboard:0.1.0 -c conduit
+	k3d image import conduit/demo-notes-mcp:latest conduit/demo-utils-mcp:latest conduit/demo-rogue-mcp:latest -c conduit || true
 
 .PHONY: deploy-local
 deploy-local: build load
@@ -124,3 +126,8 @@ e2e-gateway:
 e2e-ui:
 	@echo "Running Phase 4 Dashboard Playwright smoke test..."
 	npx tsx scripts/e2e/ui-smoke.ts
+
+.PHONY: e2e-dod
+e2e-dod:
+	@echo "Running Definition of Done (DoD) verification..."
+	npx tsx scripts/e2e/dod.ts
