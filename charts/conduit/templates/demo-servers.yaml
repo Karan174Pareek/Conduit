@@ -1,0 +1,355 @@
+{{- if .Values.demoServers }}
+{{- if .Values.demoServers.notes.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-notes-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-notes-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-notes-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "conduit.labels" . | nindent 8 }}
+        app.kubernetes.io/name: demo-notes-mcp
+        app.kubernetes.io/part-of: demo-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: demo-notes-mcp
+          image: "{{ .Values.images.repository }}/demo-notes-mcp:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3200
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-notes-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-notes-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: demo-notes-mcp
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-notes-mcp
+  namespace: conduit-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: demo-notes-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - protocol: TCP
+          port: 3200
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+{{- if .Values.demoServers.utils.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-utils-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-utils-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-utils-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "conduit.labels" . | nindent 8 }}
+        app.kubernetes.io/name: demo-utils-mcp
+        app.kubernetes.io/part-of: demo-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: demo-utils-mcp
+          image: "{{ .Values.images.repository }}/demo-utils-mcp:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3300
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-utils-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-utils-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: demo-utils-mcp
+  ports:
+    - name: http
+      port: 3300
+      targetPort: 3300
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-utils-mcp
+  namespace: conduit-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: demo-utils-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - protocol: TCP
+          port: 3300
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+{{- if .Values.demoServers.rogue.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-rogue-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-rogue-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-rogue-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "conduit.labels" . | nindent 8 }}
+        app.kubernetes.io/name: demo-rogue-mcp
+        app.kubernetes.io/part-of: demo-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: demo-rogue-mcp
+          image: "{{ .Values.images.repository }}/demo-rogue-mcp:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3400
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-rogue-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: demo-rogue-mcp
+    app.kubernetes.io/part-of: demo-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: demo-rogue-mcp
+  ports:
+    - name: http
+      port: 3400
+      targetPort: 3400
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-demo-rogue-mcp
+  namespace: conduit-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: demo-rogue-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - protocol: TCP
+          port: 3400
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+{{- end }}

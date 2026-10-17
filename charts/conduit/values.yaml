@@ -51,6 +51,13 @@ metrics:
   serviceMonitor:
     enabled: false
 
-demo:
+demoServers:
+  notes:
+    enabled: true
+    port: 3200
+  utils:
+    enabled: true
+    port: 3300
   rogue:
     enabled: false
+    port: 3400

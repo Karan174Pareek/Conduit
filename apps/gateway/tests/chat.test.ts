@@ -49,8 +49,11 @@ describe('Chat Service & Agent Loop', () => {
   let db: Db;
   let mockToolRouter: MockToolRouter;
 
-  const mongoUri = process.env.TEST_MONGO_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017';
-  const testDbName = `conduit_chat_test_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const mongoUri =
+    process.env.TEST_MONGO_URI ||
+    process.env.MONGO_URI ||
+    'mongodb://conduit:758294d005a0a96fb810a3ea827a827b512f92654b98f6e44ac322c216985ef8@127.0.0.1:27017/conduit?authSource=conduit';
+  const testDbName = 'conduit';
 
   beforeEach(async () => {
     mongoClient = new MongoClient(mongoUri);
@@ -62,7 +65,7 @@ describe('Chat Service & Agent Loop', () => {
   afterEach(async () => {
     if (db) {
       try {
-        await db.dropDatabase();
+        await db.collection('conversations').deleteMany({ title: { $regex: /^(Hello|Create|Test|Turn|User)/ } });
       } catch {}
     }
     if (mongoClient) {

@@ -73,7 +73,7 @@ spec:
       ports:
         - protocol: TCP
           port: 3100
-    # Allow MCP requests to demo MCP servers (notes, utils, etc)
+    # Allow MCP requests to demo MCP servers (notes, utils, rogue)
     - to:
         - namespaceSelector: {}
           podSelector:
@@ -83,7 +83,9 @@ spec:
         - protocol: TCP
           port: 3200
         - protocol: TCP
-          port: 3201
+          port: 3300
+        - protocol: TCP
+          port: 3400
     # Allow HTTPS egress to internet (Gemini API)
     - to:
         - ipBlock:
@@ -201,4 +203,3 @@ spec:
           port: 53
 {{- end }}
 {{- end }}
-
