@@ -87,7 +87,11 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   if (!chatService) {
     let llmClient = deps.llmClient;
     if (!llmClient) {
-      if (process.env.CONDUIT_CHAT_FAKE_LLM === 'true') {
+      const isFake = process.env.CONDUIT_CHAT_FAKE_LLM === 'true' || process.env.CHAT_LLM === 'fake';
+      if (isFake) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error('Fatal: Fake LLM client (CHAT_LLM=fake) is strictly prohibited in production (NODE_ENV=production)');
+        }
         llmClient = new FakeLlmClient();
       } else if (config.GEMINI_API_KEY) {
         llmClient = new GeminiLlmClient(config.GEMINI_API_KEY, config.GEMINI_MODEL);

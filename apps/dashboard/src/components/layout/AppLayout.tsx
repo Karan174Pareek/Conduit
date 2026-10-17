@@ -60,14 +60,14 @@ export const AppLayout: React.FC = () => {
           <div className="flex items-center space-x-4">
             {user && (
               <div className="flex items-center space-x-3">
-                <div className="text-right hidden sm:block">
+                <NavLink to="/account" className="text-right hidden sm:block hover:opacity-80 transition-opacity">
                   <div className="text-xs text-slate-400">{user.email}</div>
                   <div className="text-xs font-semibold capitalize text-slate-200">
                     <Badge variant={user.role === 'admin' ? 'info' : 'default'} size="sm">
                       {user.role}
                     </Badge>
                   </div>
-                </div>
+                </NavLink>
                 <Button variant="outline" size="sm" onClick={handleLogout}>
                   Logout
                 </Button>

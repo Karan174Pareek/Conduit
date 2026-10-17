@@ -7,6 +7,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoginPage } from './pages/LoginPage';
 import { AcceptInvitePage } from './pages/AcceptInvitePage';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { AccountPage } from './pages/AccountPage';
 import { ServersPage } from './pages/ServersPage';
 import { ApiKeysPage } from './pages/ApiKeysPage';
 import { AuditPage } from './pages/AuditPage';
@@ -39,6 +41,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Force password change screen when flagged
+  if (user.mustChangePassword && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />;
   }
 
   return <>{children}</>;
@@ -74,6 +81,16 @@ export const App: React.FC = () => {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
+                {/* Mandatory Password Change Route */}
+                <Route
+                  path="/change-password"
+                  element={
+                    <ProtectedRoute>
+                      <ChangePasswordPage />
+                    </ProtectedRoute>
+                  }
+                />
+
                 {/* Authenticated Application Shell */}
                 <Route
                   path="/"
@@ -97,6 +114,7 @@ export const App: React.FC = () => {
                   />
                   <Route path="connect" element={<ConnectPage />} />
                   <Route path="chat" element={<ChatPage />} />
+                  <Route path="account" element={<AccountPage />} />
                   <Route path="403" element={<ForbiddenPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>

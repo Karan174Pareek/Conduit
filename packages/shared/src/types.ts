@@ -11,6 +11,7 @@ export interface Principal {
   via: AuthVia;
   keyId?: string;
   source: PrincipalSource;
+  mustChangePassword?: boolean;
 }
 
 export type UpstreamServerState = 'connected' | 'unreachable' | 'disabled';

@@ -1,3 +1,8 @@
+{{- if or (eq (default "" .Values.chat.llm) "fake") (eq (default "" (index .Values "chat" "llm")) "fake") }}
+  {{- if or (hasPrefix "ghcr.io" .Values.images.repository) (ne .Values.global.domain "localhost") }}
+    {{- fail "CHAT_LLM=fake is strictly prohibited in production values" }}
+  {{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -56,6 +61,8 @@ spec:
                   - sleep
                   - "5"
           env:
+            - name: NODE_ENV
+              value: {{ .Values.nodeEnv | default "production" | quote }}
             # Plain configuration from ConfigMap
             - name: PORT
               valueFrom:

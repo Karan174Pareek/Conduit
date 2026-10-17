@@ -13,6 +13,7 @@ export interface Principal {
   via: 'apikey' | 'session';
   keyId?: string | null;
   source?: 'mcp' | 'chat';
+  mustChangePassword?: boolean;
 }
 
 export interface PolicyEngine {

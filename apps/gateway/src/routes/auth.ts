@@ -2,8 +2,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Db } from 'mongodb';
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { toObjectId, type UserDocument, type AdminEventDocument, type SessionDocument } from '../db/types.js';
-import { verifyPassword, verifyDummy } from '../services/password.js';
+import { toObjectId, type UserDocument, type SessionDocument } from '../db/types.js';
+import { verifyPassword, verifyDummy, hashPassword } from '../services/password.js';
 import { createSession, destroySession, hashSessionToken } from '../services/sessions.js';
 import { requireAuth } from '../middleware/authenticator.js';
 
@@ -11,6 +11,26 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(12, 'New password must be at least 12 characters long'),
+});
+
+const WEAK_PASSWORDS_DENY_LIST = new Set([
+  'password1234',
+  'password12345',
+  'admin1234567',
+  'admin12345678',
+  'changeme1234',
+  'changeme12345',
+  '123456789012',
+  '1234567890123',
+  'conduit12345',
+  'qwertyuiopas',
+  'administrator',
+  'rootpassword',
+]);
 
 export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async (fastify) => {
   // POST /api/auth/login
@@ -26,7 +46,7 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
 
     const { email, password } = parseResult.data;
     const normalizedEmail = email.toLowerCase();
-    const user = await db.collection('users').findOne({ email: normalizedEmail });
+    const user = await db.collection<UserDocument>('users').findOne({ email: normalizedEmail });
 
     // Constant-time path if user does not exist
     if (!user) {
@@ -63,30 +83,6 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
         { $set: updateData },
       );
 
-      await db.collection<AdminEventDocument>('admin_events').insertOne({
-        ts: now,
-        actorId: user._id.toString(),
-        actorEmail: user.email,
-        action: 'login.fail',
-        target: { type: 'user', id: user._id.toString(), label: user.email },
-        details: { email: user.email, attempts, reason: 'invalid_credentials' },
-        requestId: req.id,
-        ip: req.ip,
-      });
-
-      if (attempts >= 10) {
-        await db.collection<AdminEventDocument>('admin_events').insertOne({
-          ts: now,
-          actorId: user._id.toString(),
-          actorEmail: user.email,
-          action: 'login.lockout',
-          target: { type: 'user', id: user._id.toString(), label: user.email },
-          details: { email: user.email, attempts, lockedUntil: updateData.lockedUntil },
-          requestId: req.id,
-          ip: req.ip,
-        });
-      }
-
       return reply.status(401).send({
         code: 'unauthorized',
         message: 'Invalid email or password',
@@ -121,6 +117,7 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
         id: user._id.toString(),
         email: user.email,
         role: user.role,
+        mustChangePassword: !!user.mustChangePassword,
       },
       csrfToken,
     });
@@ -177,8 +174,108 @@ export const authRoutes = (db: Db, config: Config): FastifyPluginAsync => async 
         id: user._id.toString(),
         email: user.email,
         role: user.role,
+        mustChangePassword: !!user.mustChangePassword,
       },
       ...(csrfToken ? { csrfToken } : {}),
     });
+  });
+
+  // POST /api/auth/change-password
+  fastify.post('/change-password', { preHandler: requireAuth(db, config) }, async (req, reply) => {
+    const parseResult = changePasswordSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        code: 'validation_failed',
+        message: parseResult.error.errors[0]?.message || 'Invalid password payload',
+        statusCode: 400,
+      });
+    }
+
+    const { currentPassword, newPassword } = parseResult.data;
+    const principal = req.principal!;
+    const objId = toObjectId(principal.userId);
+    if (!objId) {
+      return reply.status(401).send({ code: 'unauthorized', message: 'User not found' });
+    }
+
+    const user = await db.collection<UserDocument>('users').findOne({ _id: objId });
+    if (!user) {
+      return reply.status(401).send({ code: 'unauthorized', message: 'User not found' });
+    }
+
+    // Policy 1: Verify current password
+    const isCurrentValid = await verifyPassword(user.passwordHash, currentPassword);
+    if (!isCurrentValid) {
+      return reply.status(400).send({
+        code: 'invalid_password',
+        message: 'Current password is incorrect',
+        statusCode: 400,
+      });
+    }
+
+    // Policy 2: New password must not match current password
+    if (currentPassword === newPassword) {
+      return reply.status(400).send({
+        code: 'validation_failed',
+        message: 'New password cannot be the same as current password',
+        statusCode: 400,
+      });
+    }
+
+    // Policy 3: Deny list and identity check
+    const normalizedNew = newPassword.toLowerCase();
+    if (WEAK_PASSWORDS_DENY_LIST.has(normalizedNew)) {
+      return reply.status(400).send({
+        code: 'validation_failed',
+        message: 'Chosen password is in the common passwords deny list. Choose a stronger password.',
+        statusCode: 400,
+      });
+    }
+
+    const emailPrefix = user.email.split('@')[0]?.toLowerCase();
+    if (emailPrefix && emailPrefix.length >= 3 && normalizedNew.includes(emailPrefix)) {
+      return reply.status(400).send({
+        code: 'validation_failed',
+        message: 'Password cannot contain parts of your email address.',
+        statusCode: 400,
+      });
+    }
+
+    // Hash new password
+    const newPasswordHash = await hashPassword(newPassword);
+
+    // Update user document
+    await db.collection<UserDocument>('users').updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          passwordHash: newPasswordHash,
+          mustChangePassword: false,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    // Revoke all OTHER sessions for this user
+    const currentSessionId = req.cookies?.['session_id'];
+    const currentTokenHash = currentSessionId ? hashSessionToken(currentSessionId) : null;
+    const sessionFilter: Record<string, unknown> = { userId: user._id.toString() };
+    if (currentTokenHash) {
+      sessionFilter['tokenHash'] = { $ne: currentTokenHash };
+    }
+    await db.collection<SessionDocument>('sessions').deleteMany(sessionFilter);
+
+    // Write audit event to admin_events
+    await db.collection('admin_events').insertOne({
+      ts: new Date(),
+      actorId: user._id.toString(),
+      actorEmail: user.email,
+      action: 'auth.password_changed',
+      target: { type: 'user', id: user._id.toString(), label: user.email },
+      details: { reason: 'user_action' },
+      ip: req.ip,
+    });
+
+    return reply.status(200).send({ ok: true, message: 'Password changed successfully' });
   });
 };

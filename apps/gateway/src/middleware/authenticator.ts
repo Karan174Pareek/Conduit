@@ -40,6 +40,7 @@ export async function authenticateRequest(
       role: user.role as Role,
       via: 'session',
       source: 'chat',
+      mustChangePassword: !!user.mustChangePassword,
     };
     req.principal = principal;
     return principal;
@@ -57,6 +58,23 @@ export function requireAuth(db: Db, config: Config) {
         message: 'Invalid or missing authentication credentials',
         statusCode: 401,
       });
+    }
+
+    if (principal.mustChangePassword) {
+      const url = req.raw.url?.split('?')[0] || '';
+      const method = req.method;
+      const isAllowed =
+        (method === 'POST' && url === '/api/auth/change-password') ||
+        (method === 'GET' && url === '/api/auth/me') ||
+        (method === 'POST' && url === '/api/auth/logout');
+
+      if (!isAllowed) {
+        return reply.status(403).send({
+          code: 'password_change_required',
+          message: 'Password change is required before proceeding',
+          statusCode: 403,
+        });
+      }
     }
   };
 }

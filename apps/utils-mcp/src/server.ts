@@ -138,8 +138,8 @@ export function createUtilsServer(port = 3300, host = '0.0.0.0', bearerToken?: s
 
       try {
         const mcpServer = new McpServer({
-          name: 'conduit-demo-utils-mcp',
-          version: '0.1.0',
+          name: 'conduit-utils-mcp',
+          version: '1.0.0',
         });
 
         // 1. utils_calculate
@@ -257,7 +257,7 @@ export function createUtilsServer(port = 3300, host = '0.0.0.0', bearerToken?: s
                 output = input.split('').reverse().join('');
                 break;
               case 'stats':
-              default:
+              default: {
                 const words = input.trim() ? input.trim().split(/\s+/).length : 0;
                 output = {
                   length: input.length,
@@ -265,6 +265,7 @@ export function createUtilsServer(port = 3300, host = '0.0.0.0', bearerToken?: s
                   lines: input.split('\n').length,
                 };
                 break;
+              }
             }
 
             return {

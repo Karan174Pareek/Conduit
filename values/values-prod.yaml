@@ -66,12 +66,16 @@ metrics:
   serviceMonitor:
     enabled: true
 
-demo:
-  rogue:
-    enabled: false
+upstreamServers:
+  notes:
+    enabled: true
+    port: 3200
+    storageSize: 500Mi
+  utils:
+    enabled: true
+    port: 3300
 
 backup:
   enabled: true
   mongoSchedule: "0 2 * * *"
   mariadbSchedule: "0 3 * * *"
-

@@ -55,10 +55,14 @@ metrics:
   serviceMonitor:
     enabled: false
 
-demo:
-  rogue:
-    enabled: false
+upstreamServers:
+  notes:
+    enabled: true
+    port: 3200
+    storageSize: 100Mi
+  utils:
+    enabled: true
+    port: 3300
 
 backup:
   enabled: true
-

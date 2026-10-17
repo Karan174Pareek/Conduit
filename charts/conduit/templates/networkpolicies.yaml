@@ -73,19 +73,17 @@ spec:
       ports:
         - protocol: TCP
           port: 3100
-    # Allow MCP requests to demo MCP servers (notes, utils, rogue)
+    # Allow MCP requests to first-party upstream MCP servers (notes, utils)
     - to:
         - namespaceSelector: {}
           podSelector:
             matchLabels:
-              app.kubernetes.io/part-of: demo-mcp
+              app.kubernetes.io/part-of: upstream-mcp
       ports:
         - protocol: TCP
           port: 3200
         - protocol: TCP
           port: 3300
-        - protocol: TCP
-          port: 3400
     # Allow HTTPS egress to internet (Gemini API)
     - to:
         - ipBlock:
