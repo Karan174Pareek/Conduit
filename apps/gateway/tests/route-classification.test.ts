@@ -32,6 +32,10 @@ const ROUTE_CLASSIFICATIONS: Record<string, RouteClassification> = {
   'GET /api/servers/:id/tools': 'session',
   'GET /api/audit': 'session',
   'GET /api/audit/export.csv': 'session',
+  'POST /api/chat': 'session',
+  'GET /api/conversations': 'session',
+  'GET /api/conversations/:id': 'session',
+  'DELETE /api/conversations/:id': 'session',
   'GET /api/invites': 'session+admin',
   'POST /api/invites': 'session+admin',
   'DELETE /api/invites/:id': 'session+admin',
@@ -53,104 +57,111 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
   let mongoClient: MongoClient;
   let db: Db;
   let adminSessionCookie: string;
-  let memberSessionCookie: string;
   let adminCsrf: string;
+  let memberSessionCookie: string;
   let memberCsrf: string;
   let validApiKey: string;
   let testApp: FastifyInstance;
   const discoveredRoutes: Array<{ method: string; path: string }> = [];
 
-  const rawMongoUri =
-    process.env['TEST_MONGO_URI'] ||
-    process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
-  const mongoUri = rawMongoUri.replace(/\/([^/?]+)(\?|$)/, `/conduit_route_class_${Date.now()}$2`);
-
   const testConfig: Config = {
-    NODE_ENV: 'test',
-    PORT: 0,
-    HOST: '127.0.0.1',
-    MONGO_URI: mongoUri,
-    SESSION_SECRET: '0'.repeat(64),
-    API_KEY_PEPPER: '1'.repeat(64),
-    CREDENTIAL_ENC_KEYS: 'k1:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-    BOOTSTRAP_ADMIN_EMAIL: 'admin@conduit.localhost',
-    BOOTSTRAP_ADMIN_PASSWORD: 'adminPassword123!',
-    PUBLIC_DASHBOARD_URL: 'http://dashboard.localhost',
-    PUBLIC_GATEWAY_URL: 'http://gateway.localhost',
-    ALLOWED_ORIGINS: 'http://dashboard.localhost,http://localhost',
-    WOO_MCP_URL: 'http://127.0.0.1:9999/mcp',
-    WOO_MCP_BEARER_TOKEN: 'secret_token',
-    LOG_LEVEL: 'fatal',
+    PORT: 3000,
+    HOST: '0.0.0.0',
+    MONGO_URI: process.env.MONGO_URI || 'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin',
+    MONGO_DB_NAME: `conduit_test_route_class_${Date.now()}`,
+    SESSION_SECRET: 'test-session-secret-must-be-at-least-32-chars-long!',
+    CREDENTIAL_ENC_KEYS: 'k1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+    LOG_LEVEL: 'silent',
+    DASHBOARD_ORIGIN: 'http://dashboard.localhost',
+    ALLOWED_ORIGINS: 'http://dashboard.localhost',
+    INVITE_ONLY: true,
+    CORS_ALLOWED_ORIGINS: ['http://dashboard.localhost'],
+    AUDIT_RETENTION_DAYS: 30,
+    MAX_CONCURRENT_PER_UPSTREAM: 8,
+    UPSTREAM_CALL_TIMEOUT_MS: 30000,
+    COOKIE_SECURE: false,
+    API_KEY_PEPPER: 'test-api-key-pepper-must-be-32-chars!',
+    ADMIN_INIT_SECRET: 'test-admin-secret-at-least-32-chars-long!',
+    SYSTEM_INIT_MODE: false,
+    ADMIN_EMAIL: '',
+    ADMIN_PASSWORD: '',
+    ORG_NAME: 'Test Org',
+    GEMINI_API_KEY: '',
+    GEMINI_MODEL: 'gemini-2.5-flash',
   };
 
   beforeAll(async () => {
     mongoClient = new MongoClient(testConfig.MONGO_URI);
     await mongoClient.connect();
-    db = mongoClient.db();
+    db = mongoClient.db(testConfig.MONGO_DB_NAME);
 
-    const crypto = new CredentialCrypto(parseEncryptionKeys(testConfig.CREDENTIAL_ENC_KEYS));
+    // Seed admin user
+    const adminPasswordHash = await hashPassword('AdminPass123!');
+    const adminUserRes = await db.collection<UserDocument>('users').insertOne({
+      _id: new ObjectId(),
+      email: 'admin@conduit.localhost',
+      name: 'Admin User',
+      passwordHash: adminPasswordHash,
+      role: 'admin',
+      failedLoginAttempts: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const adminSession = await createSession(db, adminUserRes.insertedId.toString());
+    adminSessionCookie = `session_id=${adminSession.sessionId}`;
+    adminCsrf = adminSession.csrfToken;
+
+    // Seed member user
+    const memberPasswordHash = await hashPassword('MemberPass123!');
+    const memberUserRes = await db.collection<UserDocument>('users').insertOne({
+      _id: new ObjectId(),
+      email: 'member@conduit.localhost',
+      name: 'Member User',
+      passwordHash: memberPasswordHash,
+      role: 'member',
+      failedLoginAttempts: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const memberSession = await createSession(db, memberUserRes.insertedId.toString());
+    memberSessionCookie = `session_id=${memberSession.sessionId}`;
+    memberCsrf = memberSession.csrfToken;
+
+    // Build app and register route listener
+    const credCrypto = new CredentialCrypto(parseEncryptionKeys(testConfig.CREDENTIAL_ENC_KEYS));
     const catalogService = new CatalogService(db);
-    const upstreamManager = new UpstreamManager(db, crypto, catalogService);
+    const upstreamManager = new UpstreamManager(db, credCrypto, catalogService);
     const auditSink = new MongoAuditSink(db);
-    const toolRouter = new ToolRouter(catalogService, upstreamManager, auditSink);
+    const toolRouter = new ToolRouter(db, upstreamManager, undefined, undefined, auditSink);
 
     testApp = buildApp(testConfig, db, {
-      crypto,
+      crypto: credCrypto,
       catalogService,
       upstreamManager,
       toolRouter,
       auditSink,
     });
 
-    // Introspect Fastify route table via onRoute hook
     testApp.addHook('onRoute', (routeOptions: RouteOptions) => {
-      const methods = Array.isArray(routeOptions.method) ? routeOptions.method : [routeOptions.method];
-      for (const m of methods) {
-        if (m !== 'HEAD') {
-          discoveredRoutes.push({ method: m, path: routeOptions.url });
+      // Exclude HEAD/OPTIONS and Fastify internals
+      const method = routeOptions.method;
+      if (typeof method === 'string' && method !== 'HEAD' && method !== 'OPTIONS') {
+        discoveredRoutes.push({ method, path: routeOptions.url });
+      } else if (Array.isArray(method)) {
+        for (const m of method) {
+          if (m !== 'HEAD' && m !== 'OPTIONS') {
+            discoveredRoutes.push({ method: m, path: routeOptions.url });
+          }
         }
       }
     });
 
     await testApp.ready();
 
-    // 1. Seed Admin user
-    const adminId = new ObjectId();
-    await db.collection<UserDocument>('users').insertOne({
-      _id: adminId,
-      email: 'admin@conduit.localhost',
-      name: 'System Admin',
-      passwordHash: await hashPassword('adminPassword123!'),
-      role: 'admin',
-      failedLoginAttempts: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    const adminSession = await createSession(db, adminId.toString());
-    adminSessionCookie = `session_id=${adminSession.sessionId}`;
-    adminCsrf = adminSession.csrfToken;
-
-    // 2. Seed Member user
-    const memberId = new ObjectId();
-    await db.collection<UserDocument>('users').insertOne({
-      _id: memberId,
-      email: 'member@conduit.localhost',
-      name: 'Team Member',
-      passwordHash: await hashPassword('memberPassword123!'),
-      role: 'member',
-      failedLoginAttempts: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    const memberSession = await createSession(db, memberId.toString());
-    memberSessionCookie = `session_id=${memberSession.sessionId}`;
-    memberCsrf = memberSession.csrfToken;
-
-    // 3. Issue valid API key
-    const created = await createApiKey(db, testConfig.API_KEY_PEPPER, memberId.toString(), 'classification-test-key');
+    // Create an API key for the member
+    const created = await createApiKey(db, memberUserRes.insertedId.toString(), 'test-api-key');
     validApiKey = created.key;
-  });
+  }, 30000);
 
   afterAll(async () => {
     if (testApp) await testApp.close();

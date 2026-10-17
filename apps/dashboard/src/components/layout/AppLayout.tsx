@@ -51,19 +51,9 @@ export const AppLayout: React.FC = () => {
               <NavLink to="/connect" className={navClass}>
                 Connect
               </NavLink>
-              <div className="relative group">
-                <button
-                  type="button"
-                  disabled
-                  className="px-3 py-2 rounded-md text-sm font-medium text-slate-500 cursor-not-allowed flex items-center space-x-1.5"
-                  title="Coming in Phase 5"
-                >
-                  <span>Chat</span>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                    Phase 5
-                  </span>
-                </button>
-              </div>
+              <NavLink to="/chat" className={navClass}>
+                Chat
+              </NavLink>
             </nav>
           </div>
 
