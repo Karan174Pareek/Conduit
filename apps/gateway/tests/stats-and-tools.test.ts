@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { runMigrations } from '../src/db/migrations/runner.js';
 import { hashPassword } from '../src/services/password.js';
 import type { Config } from '../src/config.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
 describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000 }, () => {
   let client: MongoClient;
@@ -13,12 +14,7 @@ describe('Dashboard Contract & Server Stats Integration Tests', { timeout: 30000
   let app: FastifyInstance;
   let mockServer: http.Server;
   let mockServerPort: number;
-  const dbName = `test-dashboard-stats-${Date.now()}`;
-
-  const TEST_MONGO_URI =
-    process.env['TEST_MONGO_URI'] ||
-    process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
+  const { dbName, uri: TEST_MONGO_URI } = getIsolatedTestDbUri('stats');
 
   let testConfig: Config;
   let adminCookie: string;

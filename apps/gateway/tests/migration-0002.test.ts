@@ -2,11 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoClient, Db } from 'mongodb';
 import { runMigrations, getCurrentSchemaVersion, isSchemaReady } from '../src/db/migrations/runner.js';
 import * as m0001 from '../src/db/migrations/0001_init.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
-const TEST_MONGO_URI =
-  process.env['TEST_MONGO_URI'] ||
-  process.env['MONGO_URI'] ||
-  'mongodb://root:rootpass@127.0.0.1:27017/conduit_test_mig?authSource=admin';
+const { dbName: testDbName, uri: TEST_MONGO_URI } = getIsolatedTestDbUri('mig0002');
 
 describe('Migration 0002 Tool Catalog Index Fixes', { timeout: 30000 }, () => {
   let mongoClient: MongoClient;
@@ -14,16 +12,18 @@ describe('Migration 0002 Tool Catalog Index Fixes', { timeout: 30000 }, () => {
 
   beforeAll(async () => {
     mongoClient = new MongoClient(TEST_MONGO_URI, {
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000,
     });
     await mongoClient.connect();
-    db = mongoClient.db();
+    db = mongoClient.db(testDbName);
   });
 
   afterAll(async () => {
     if (mongoClient) {
-      await db.dropDatabase();
+      if (db) {
+        await db.dropDatabase().catch(() => {});
+      }
       await mongoClient.close();
     }
   });

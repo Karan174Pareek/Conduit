@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { MongoClient, type Db, ObjectId } from 'mongodb';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 import { ChatService } from '../src/chat/service.js';
 import type { LlmClient, LlmResponse } from '../src/chat/types.js';
 import type { ToolRouter, Principal } from '../src/router/tool-router.js';
@@ -49,24 +50,25 @@ describe('Chat Service & Agent Loop', () => {
   let db: Db;
   let mockToolRouter: MockToolRouter;
 
-  const mongoUri =
-    process.env.TEST_MONGO_URI ||
-    process.env.MONGO_URI ||
-    'mongodb://conduit:758294d005a0a96fb810a3ea827a827b512f92654b98f6e44ac322c216985ef8@127.0.0.1:27017/conduit?authSource=conduit';
-  const testDbName = 'conduit';
+  const { dbName: testDbName, uri: mongoUri } = getIsolatedTestDbUri('chat');
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     mongoClient = new MongoClient(mongoUri);
     await mongoClient.connect();
     db = mongoClient.db(testDbName);
+  });
+
+  beforeEach(async () => {
     mockToolRouter = new MockToolRouter();
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     if (db) {
       try {
-        await db.collection('conversations').deleteMany({ title: { $regex: /^(Hello|Create|Test|Turn|User)/ } });
-      } catch {}
+        await db.dropDatabase();
+      } catch (_err) {
+        void _err;
+      }
     }
     if (mongoClient) {
       await mongoClient.close();
