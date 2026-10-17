@@ -17,6 +17,7 @@ import type {
 import { toObjectId } from '../db/types.js';
 import { CredentialCrypto } from '../registry/crypto.js';
 import { assertValidServerUrl } from '../registry/url-policy.js';
+import { createSecureFetch } from '../registry/secure-fetch.js';
 import { CatalogService } from '../catalog/service.js';
 import { UpstreamManager } from '../upstream/manager.js';
 
@@ -427,7 +428,9 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
     }
 
     const transport = new StreamableHTTPClientTransport(new URL(url), {
-      requestInit: { headers },
+      fetch: createSecureFetch(),
+      requestInit: { headers, redirect: 'error' },
+      redirectPolicy: 'same-origin',
     });
 
     const client = new Client(

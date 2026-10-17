@@ -28,6 +28,10 @@ export class CredentialCrypto {
     }
   }
 
+  getActiveKid(): string {
+    return this.activeKey.kid;
+  }
+
   /**
    * Encrypts an upstream credential using AES-256-GCM with a 12-byte random IV,
    * setting AAD to the serverId. Uses the active (first) key id.

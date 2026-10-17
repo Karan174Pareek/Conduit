@@ -23,6 +23,9 @@ import { ChatService } from './chat/service.js';
 import { GeminiLlmClient } from './chat/gemini-client.js';
 import { FakeLlmClient } from './chat/fake-client.js';
 import type { LlmClient } from './chat/types.js';
+import { policiesRoutes } from './routes/policies.js';
+import { DbPolicyEngine } from './policy/engine.js';
+import { TokenBucketRateLimiter } from './middleware/rate-limiter.js';
 
 export interface AppDependencies {
   crypto?: CredentialCrypto;
@@ -50,6 +53,7 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
           },
         }),
     bodyLimit: 1024 * 1024, // 1 MB request body limit
+    connectionTimeout: 10000,
     requestIdHeader: 'x-request-id',
     genReqId: (req) => {
       const existing = req.headers['x-request-id'];
@@ -60,15 +64,38 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
     },
   });
 
-  // Register cookie parser
+  // Enforce underlying HTTP timeouts
+  if (app.server) {
+    app.server.headersTimeout = 10000;
+    app.server.requestTimeout = 30000;
+  }
+
+  // Register cookie parser with secure flag in production
   app.register(fastifyCookie, {
     secret: config.SESSION_SECRET,
-    parseOptions: {},
+    parseOptions: {
+      secure: config.NODE_ENV === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+    },
   });
 
-  // Always echo x-request-id in response headers
+  // Security headers and cache control hook
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id);
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.removeHeader('X-Powered-By');
+
+    if (request.url.startsWith('/api')) {
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+
+    const proto = request.headers['x-forwarded-proto'];
+    if (proto === 'https' || request.protocol === 'https') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
   });
 
   // Apply CSRF and Origin check on mutating API requests
@@ -80,7 +107,9 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   const catalogService = deps.catalogService ?? new CatalogService(db, app.log);
   const upstreamManager = deps.upstreamManager ?? new UpstreamManager(db, credCrypto, catalogService, app.log);
   const auditSink = deps.auditSink ?? new MongoAuditSink(db, app.log);
-  const toolRouter = deps.toolRouter ?? new ToolRouter(db, upstreamManager, undefined, undefined, auditSink, app.log);
+  const policyEngine = new DbPolicyEngine(db);
+  const rateLimiter = new TokenBucketRateLimiter();
+  const toolRouter = deps.toolRouter ?? new ToolRouter(db, upstreamManager, policyEngine, rateLimiter, auditSink, app.log);
 
   // Initialize ChatService
   let chatService = deps.chatService;
@@ -128,6 +157,7 @@ export function buildApp(config: Config, db: Db, deps: AppDependencies = {}): Fa
   app.register(inviteRoutes, { db, config, prefix: '/api' });
   app.register(userRoutes, { db, config, prefix: '/api' });
   app.register(chatRoutes, { db, config, chatService, prefix: '/api' });
+  app.register(policiesRoutes, { db, config, prefix: '/api/policies' });
 
   // MCP front door
   app.register(mcpRoutes, { db, config, toolRouter });

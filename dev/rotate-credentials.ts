@@ -1,17 +1,22 @@
 #!/usr/bin/env node
-/**
- * scripts/rotate-credentials.ts
- *
- * Re-encrypts all stored MCP server credentials in the database using the new
- * active key from CREDENTIAL_ENC_KEYS.
- *
- * TODO (Phase 8): Implement full batch rotation workflow:
- * 1. Read all mcp_servers with an encrypted auth credential.
- * 2. Decrypt using the attached `kid`.
- * 3. Re-encrypt with the active (first) key in CREDENTIAL_ENC_KEYS.
- * 4. Atomically update the documents in MongoDB.
- * 5. Log audit event and bump system_state.configVersion.
- */
+import { rotateCredentials } from '../apps/gateway/src/registry/rotate.js';
 
-console.log('rotate-credentials stub: rotation logic will be implemented in Phase 8.');
-process.exit(0);
+const mongoUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/conduit';
+const encKeys = process.env.CREDENTIAL_ENC_KEYS;
+
+if (!encKeys) {
+  console.error('Error: CREDENTIAL_ENC_KEYS environment variable is required');
+  process.exit(1);
+}
+
+rotateCredentials(mongoUri, encKeys)
+  .then((res) => {
+    console.log(
+      `[rotate-credentials] Scanned ${res.totalScanned} servers, re-encrypted ${res.rotatedCount} credentials to active kid: ${res.activeKid}`,
+    );
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error('[rotate-credentials] Failed:', err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
