@@ -9,6 +9,7 @@ export interface ChatTurnCallbacks {
   onTextDelta?: (data: { delta: string }) => void;
   onToolCall?: (data: { id: string; server: string; tool: string; args: Record<string, unknown> }) => void;
   onToolResult?: (data: { id: string; server: string; tool: string; ok: boolean; durationMs: number; summary: string }) => void;
+  onConfirmRequired?: (data: { id: string; server: string; tool: string; args: Record<string, unknown>; summary: string }) => void;
   onError?: (data: { code: string; message: string }) => void;
   onDone?: (data: { turnId: string; usage?: { inputTokens?: number; outputTokens?: number } }) => void;
 }
@@ -113,10 +114,11 @@ export class ChatService {
     userRole: string;
     conversationId?: string;
     message: string;
+    confirmedToolCalls?: string[];
     signal?: AbortSignal;
     callbacks: ChatTurnCallbacks;
   }): Promise<void> {
-    const { userId, userEmail, userName, userRole, message, signal, callbacks } = params;
+    const { userId, userEmail, userName, userRole, message, confirmedToolCalls, signal, callbacks } = params;
 
     // Concurrency check: One active turn per user
     if (this.activeTurns.has(userId)) {
@@ -321,6 +323,26 @@ export class ChatService {
             tool: toolName,
             args: tc.args,
           });
+
+          // Destructive tool confirmation gate
+          const confirmDestructive = process.env.CHAT_CONFIRM_DESTRUCTIVE === 'true';
+          if (confirmDestructive && !confirmedToolCalls?.includes(tc.id)) {
+            const catalogItem = await this.db.collection('tool_catalog').findOne({
+              exposedName: tc.name,
+              removedAt: null,
+            });
+            if (catalogItem?.annotations?.destructiveHint === true) {
+              const summary = `Action requires confirmation: ${tc.name}`;
+              callbacks.onConfirmRequired?.({
+                id: tc.id,
+                server: serverSlug,
+                tool: toolName,
+                args: tc.args,
+                summary,
+              });
+              return;
+            }
+          }
 
           const toolStart = Date.now();
           let rawOutputStr = '';

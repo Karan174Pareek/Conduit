@@ -150,6 +150,21 @@ export interface InviteDocument {
   createdAt: Date;
 }
 
+export interface PolicyDocument {
+  _id?: ObjectId;
+  scope: 'role' | 'user';
+  role?: Role;
+  subjectId?: string;
+  serverId: string;
+  toolPattern: string;
+  effect: 'allow' | 'deny';
+  readOnlyOnly?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+}
+
+
 export function toObjectId(id: string): ObjectId | null {
   if (ObjectId.isValid(id)) {
     return new ObjectId(id);

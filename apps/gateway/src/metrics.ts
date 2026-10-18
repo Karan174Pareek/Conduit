@@ -49,6 +49,13 @@ export const auditDropsCounter = new client.Counter({
   registers: [register],
 });
 
+export const rateLimitsExceededCounter = new client.Counter({
+  name: 'conduit_rate_limit_exceeded_total',
+  help: 'Total count of requests rejected due to rate limiting or concurrency caps',
+  labelNames: ['route', 'key_type'],
+  registers: [register],
+});
+
 export interface MetricsServerHandle {
   server: http.Server;
   close: () => Promise<void>;
