@@ -1,0 +1,18 @@
+{{- if and .Values.limitRange .Values.limitRange.enabled }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "conduit.fullname" . }}-limitrange
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ .Values.limitRange.defaultLimitCpu | default "500m" | quote }}
+        memory: {{ .Values.limitRange.defaultLimitMemory | default "512Mi" | quote }}
+      defaultRequest:
+        cpu: {{ .Values.limitRange.defaultRequestCpu | default "50m" | quote }}
+        memory: {{ .Values.limitRange.defaultRequestMemory | default "64Mi" | quote }}
+{{- end }}
