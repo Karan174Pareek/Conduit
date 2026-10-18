@@ -11,16 +11,16 @@ permissions:
 
 jobs:
   validate:
-    name: Lint, Typecheck, Test, Build & Helm Check
+    name: Lint, Typecheck, Test, Audit & Helm Validation
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.1.0
         with:
           node-version: 22
           cache: 'npm'
@@ -34,14 +34,17 @@ jobs:
       - name: Run Typecheck
         run: npm run typecheck
 
-      - name: Run Tests (Automated Throwaway MongoDB)
+      - name: Production Dependency Audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run Unit & Integration Tests (Throwaway Containerized Mongo)
         run: npm run test
 
       - name: Build Packages & Apps
         run: npm run build
 
       - name: Setup Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v4.2.0
         with:
           version: v3.16.2
 
@@ -57,42 +60,72 @@ jobs:
           helm template store charts/woocommerce-store -f values/values-local.yaml > /dev/null
           helm template store charts/woocommerce-store -f values/values-prod.yaml > /dev/null
 
+      - name: Setup Kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Kubeconform Schema Validation
+        run: |
+          helm template conduit charts/conduit -f values/values-prod.yaml | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.30.0
+          helm template store charts/woocommerce-store -f values/values-prod.yaml | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.30.0
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          npx @cyclonedx/cyclonedx-npm --output-file conduit-sbom.json
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: conduit-cyclonedx-sbom
+          path: conduit-sbom.json
+
   security-scan:
-    name: Security & Secret Scan (Gitleaks & Trivy)
+    name: Security Scans (Gitleaks & Trivy)
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Checkout Code (Full History for Gitleaks)
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
-      - name: Gitleaks Secret Scanner
-        uses: gitleaks/gitleaks-action@v2
+      - name: Gitleaks Secret Scanner (Full History)
+        uses: gitleaks/gitleaks-action@v2.3.7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy Vulnerability, Secret & Misconfig Scan
-        uses: aquasecurity/trivy-action@v0.36.0
+      - name: Trivy Filesystem Scan (Vuln, Misconfig, Secret)
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'table'
-          scanners: 'misconfig,secret'
+          scanners: 'vuln,misconfig,secret'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
-          ignore-unfixed: true
           trivyignores: '.trivyignore.yaml'
 
-      - name: Build Dashboard Docker Image
-        run: docker build -t conduit/dashboard:ci -f apps/dashboard/Dockerfile .
+      - name: Build All Microservice Docker Images
+        run: |
+          docker build -t conduit/gateway:ci -f apps/gateway/Dockerfile .
+          docker build -t conduit/dashboard:ci -f apps/dashboard/Dockerfile .
+          docker build -t conduit/notes-mcp:ci -f apps/notes-mcp/Dockerfile .
+          docker build -t conduit/utils-mcp:ci -f apps/utils-mcp/Dockerfile .
+          docker build -t conduit/woo-mcp:ci -f apps/woo-mcp/Dockerfile .
+
+      - name: Trivy Gateway Image Scan
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: 'conduit/gateway:ci'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Trivy Dashboard Image Scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: 'conduit/dashboard:ci'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
-          ignore-unfixed: true
