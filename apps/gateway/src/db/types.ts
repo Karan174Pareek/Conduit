@@ -10,6 +10,7 @@ export interface UserDocument {
   status?: 'invited' | 'active' | 'disabled';
   failedLoginAttempts?: number;
   lockedUntil?: Date | null;
+  mustChangePassword?: boolean;
   disabled?: boolean;
   disabledAt?: Date | null;
   lastLoginAt?: Date | null;

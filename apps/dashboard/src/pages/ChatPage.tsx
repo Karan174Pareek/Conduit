@@ -174,7 +174,9 @@ export const ChatPage: React.FC = () => {
         let errJson: any = {};
         try {
           errJson = await response.json();
-        } catch {}
+        } catch (_e) {
+          void _e;
+        }
         throw new Error(errJson.message || `Chat request failed (${response.status})`);
       }
 

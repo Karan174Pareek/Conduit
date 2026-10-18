@@ -13,6 +13,14 @@ export function requireRole(expectedRole: Role, db?: Db) {
       });
     }
 
+    if (req.principal.mustChangePassword) {
+      return reply.status(403).send({
+        code: 'password_change_required',
+        message: 'Password change is required before proceeding',
+        statusCode: 403,
+      });
+    }
+
     if (db) {
       const objId = toObjectId(req.principal.userId);
       if (objId) {

@@ -25,6 +25,7 @@ const ROUTE_CLASSIFICATIONS: Record<string, RouteClassification> = {
   'POST /api/auth/accept-invite': 'public',
   'GET /api/config': 'public',
   'POST /api/auth/logout': 'session',
+  'POST /api/auth/change-password': 'session',
   'GET /api/auth/me': 'session',
   'GET /api/keys': 'session',
   'POST /api/keys': 'session',

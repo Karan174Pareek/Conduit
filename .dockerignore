@@ -1,0 +1,9 @@
+.git
+.github
+dev
+tests
+docs
+scratch
+*.md
+.env*
+coverage

@@ -51,13 +51,11 @@ metrics:
   serviceMonitor:
     enabled: false
 
-demoServers:
+upstreamServers:
   notes:
     enabled: true
     port: 3200
+    storageSize: 100Mi
   utils:
     enabled: true
     port: 3300
-  rogue:
-    enabled: false
-    port: 3400

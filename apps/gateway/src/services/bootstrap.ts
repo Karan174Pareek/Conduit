@@ -23,11 +23,12 @@ export async function bootstrapAdmin(
         passwordHash,
         failedLoginAttempts: 0,
         lockedUntil: null,
+        mustChangePassword: true,
         createdAt: now,
         updatedAt: now,
       });
 
-      logger.info({ email: config.BOOTSTRAP_ADMIN_EMAIL }, 'Bootstrap admin user successfully created');
+      logger.info({ email: config.BOOTSTRAP_ADMIN_EMAIL }, 'Bootstrap admin user successfully created with mustChangePassword=true');
     } else {
       logger.info('Admin user already exists; skipping bootstrap');
     }

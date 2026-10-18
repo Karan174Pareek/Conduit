@@ -1,0 +1,264 @@
+{{- if and .Values.upstreamServers .Values.upstreamServers.notes.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notes-mcp-data
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notes-mcp
+    app.kubernetes.io/part-of: upstream-mcp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.upstreamServers.notes.storageSize | default "100Mi" }}
+{{- if .Values.storage.className }}
+  storageClassName: {{ .Values.storage.className }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conduit.fullname" . }}-notes-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notes-mcp
+    app.kubernetes.io/part-of: upstream-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notes-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "conduit.labels" . | nindent 8 }}
+        app.kubernetes.io/name: notes-mcp
+        app.kubernetes.io/part-of: upstream-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: notes-mcp
+          image: "{{ .Values.images.repository }}/notes-mcp:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          env:
+            - name: NOTES_FILE_PATH
+              value: /data/notes.json
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3200
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: notes-data
+              mountPath: /data
+      volumes:
+        - name: notes-data
+          persistentVolumeClaim:
+            claimName: notes-mcp-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: notes-mcp
+    app.kubernetes.io/part-of: upstream-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: notes-mcp
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-notes-mcp
+  namespace: conduit-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: notes-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - protocol: TCP
+          port: 3200
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}
+{{- if and .Values.upstreamServers .Values.upstreamServers.utils.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conduit.fullname" . }}-utils-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: utils-mcp
+    app.kubernetes.io/part-of: upstream-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: utils-mcp
+  template:
+    metadata:
+      labels:
+        {{- include "conduit.labels" . | nindent 8 }}
+        app.kubernetes.io/name: utils-mcp
+        app.kubernetes.io/part-of: upstream-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: utils-mcp
+          image: "{{ .Values.images.repository }}/utils-mcp:{{ .Values.images.tag | default .Chart.AppVersion | default "latest" }}"
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - name: http
+              containerPort: 3300
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: utils-mcp
+  namespace: conduit-system
+  labels:
+    {{- include "conduit.labels" . | nindent 4 }}
+    app.kubernetes.io/name: utils-mcp
+    app.kubernetes.io/part-of: upstream-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: utils-mcp
+  ports:
+    - name: http
+      port: 3300
+      targetPort: 3300
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "conduit.fullname" . }}-utils-mcp
+  namespace: conduit-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: utils-mcp
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gateway
+      ports:
+        - protocol: TCP
+          port: 3300
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

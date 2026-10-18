@@ -157,23 +157,23 @@ async function main() {
   console.log(`✓ Admin session established for ${adminEmail} (CSRF token present)`);
 
   // 4. Register and Approve Demo MCP Servers
-  console.log('\n==> [4/11] Ensuring demo servers are registered and tools approved...');
+  console.log('\n==> [4/11] Ensuring first-party upstream servers are registered and tools approved...');
   const serversRes = await fetchHttp(`${DASHBOARD_URL}/api/servers`, {
     headers: { cookie: adminCookie, origin: DASHBOARD_URL },
   });
 
   const existingServers: any[] = serversRes.json.servers || [];
-  let notesServer = existingServers.find((s) => s.slug === 'notes' || s.name === 'Demo Notes MCP');
-  let utilsServer = existingServers.find((s) => s.slug === 'utils' || s.name === 'Demo Utils MCP');
+  let notesServer = existingServers.find((s) => s.slug === 'notes' || s.name === 'Team Notes MCP');
+  let utilsServer = existingServers.find((s) => s.slug === 'utils' || s.name === 'Utils MCP');
 
   if (!notesServer) {
     const regNotes = await fetchHttp(`${DASHBOARD_URL}/api/servers`, {
       method: 'POST',
       headers: { cookie: adminCookie, 'x-csrf-token': adminCsrf, origin: DASHBOARD_URL },
       body: JSON.stringify({
-        name: 'Demo Notes MCP',
+        name: 'Team Notes MCP',
         slug: 'notes',
-        url: 'http://conduit-demo-notes-mcp.conduit-system.svc.cluster.local:3200/mcp',
+        url: 'http://notes-mcp.conduit-system.svc.cluster.local:3200/mcp',
         transport: 'streamable-http',
       }),
     });
@@ -187,9 +187,9 @@ async function main() {
       method: 'POST',
       headers: { cookie: adminCookie, 'x-csrf-token': adminCsrf, origin: DASHBOARD_URL },
       body: JSON.stringify({
-        name: 'Demo Utils MCP',
+        name: 'Utils MCP',
         slug: 'utils',
-        url: 'http://conduit-demo-utils-mcp.conduit-system.svc.cluster.local:3300/mcp',
+        url: 'http://utils-mcp.conduit-system.svc.cluster.local:3300/mcp',
         transport: 'streamable-http',
       }),
     });

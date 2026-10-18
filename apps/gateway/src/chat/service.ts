@@ -403,7 +403,9 @@ export class ChatService {
             interrupted: true,
             createdAt: new Date(),
           });
-        } catch {}
+        } catch (_e) {
+          void _e;
+        }
       }
 
       callbacks.onError?.({
