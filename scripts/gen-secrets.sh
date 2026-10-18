@@ -3,9 +3,10 @@ set -euo pipefail
 
 # scripts/gen-secrets.sh
 # Generates local .env with cryptographically random secrets if not present,
+# reads existing .env and fills ONLY missing values without overwriting or losing GEMINI_API_KEY,
 # and optionally provisions Kubernetes Secrets when connected to a cluster.
 
-ENV_FILE=".env"
+ENV_FILE="${ENV_FILE:-.env}"
 
 random_hex() {
   if command -v openssl >/dev/null 2>&1; then
@@ -23,85 +24,73 @@ random_base64() {
   fi
 }
 
+# Helper to ensure a variable exists in $ENV_FILE without modifying existing value
+ensure_var() {
+  local var_name="$1"
+  local default_val="$2"
+  if ! grep -q "^${var_name}=" "$ENV_FILE" 2>/dev/null; then
+    echo "${var_name}=${default_val}" >> "$ENV_FILE"
+  fi
+}
+
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Generating fresh $ENV_FILE with secure random secrets..."
-  
-  SESSION_SECRET="$(random_hex)"
-  API_KEY_PEPPER="$(random_hex)"
-  ENC_KEY_B64="$(random_base64)"
-  ADMIN_PASSWORD="$(random_hex)"
-  WOO_BEARER="$(random_hex)"
-  MONGO_ROOT_USER="root"
-  MONGO_ROOT_PASSWORD="$(random_hex)"
-  MONGO_USER="conduit"
-  MONGO_PASSWORD="$(random_hex)"
-  MONGO_DB="conduit"
-  MONGO_URI="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@conduit-mongodb:27017/${MONGO_DB}?authSource=${MONGO_DB}"
-
-  cat <<EOF > "$ENV_FILE"
-# Generated local secrets for Conduit dev environment
-PUBLIC_DASHBOARD_URL=http://dashboard.localhost
-PUBLIC_GATEWAY_URL=http://gateway.localhost
-PUBLIC_SHOP_URL=http://shop.localhost
-ALLOWED_ORIGINS=http://dashboard.localhost
-
-SESSION_SECRET=${SESSION_SECRET}
-API_KEY_PEPPER=${API_KEY_PEPPER}
-CREDENTIAL_ENC_KEYS=kid1:${ENC_KEY_B64}
-
-BOOTSTRAP_ADMIN_EMAIL=admin@conduit.localhost
-BOOTSTRAP_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-
-GEMINI_API_KEY=\${GEMINI_API_KEY:-}
-GEMINI_MODEL=gemini-2.5-flash
-
-MONGO_ROOT_USER=${MONGO_ROOT_USER}
-MONGO_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
-MONGO_USER=${MONGO_USER}
-MONGO_PASSWORD=${MONGO_PASSWORD}
-MONGO_DB=${MONGO_DB}
-MONGO_URI=${MONGO_URI}
-
-WOO_MCP_BEARER_TOKEN=${WOO_BEARER}
-
-MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
-MARIADB_PASSWORD=${MARIADB_PASSWORD}
-WP_ADMIN_PASSWORD=${WP_ADMIN_PASSWORD}
-WP_CONSUMER_KEY=${WP_CONSUMER_KEY}
-WP_CONSUMER_SECRET=${WP_CONSUMER_SECRET}
-EOF
-  echo "$ENV_FILE created successfully."
+  touch "$ENV_FILE"
 else
-  echo "$ENV_FILE already exists, preserving existing values."
-  # Ensure any newly required Mongo variables exist in existing .env
-  if ! grep -q "^MONGO_ROOT_PASSWORD=" "$ENV_FILE" 2>/dev/null; then
-    NEW_ROOT_PASS="$(random_hex)"
-    echo "MONGO_ROOT_USER=root" >> "$ENV_FILE"
-    echo "MONGO_ROOT_PASSWORD=${NEW_ROOT_PASS}" >> "$ENV_FILE"
-  fi
-  if ! grep -q "^MONGO_PASSWORD=" "$ENV_FILE" 2>/dev/null; then
-    NEW_APP_PASS="$(random_hex)"
-    echo "MONGO_USER=conduit" >> "$ENV_FILE"
-    echo "MONGO_PASSWORD=${NEW_APP_PASS}" >> "$ENV_FILE"
-    echo "MONGO_DB=conduit" >> "$ENV_FILE"
-  fi
-  if ! grep -q "^MONGO_URI=" "$ENV_FILE" 2>/dev/null; then
-    # Sourced below to compose MONGO_URI
-    set -a
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
-    set +a
-    echo "MONGO_URI=mongodb://${MONGO_USER:-conduit}:${MONGO_PASSWORD}@conduit-mongodb:27017/${MONGO_DB:-conduit}?authSource=${MONGO_DB:-conduit}" >> "$ENV_FILE"
-  fi
+  echo "$ENV_FILE already exists, preserving existing values and filling missing secrets..."
 fi
+
+# Ensure URLs & Origins
+ensure_var "PUBLIC_DASHBOARD_URL" "http://dashboard.localhost"
+ensure_var "PUBLIC_GATEWAY_URL" "http://gateway.localhost"
+ensure_var "PUBLIC_SHOP_URL" "http://shop.localhost"
+ensure_var "ALLOWED_ORIGINS" "http://dashboard.localhost"
+
+# Ensure security keys
+ensure_var "SESSION_SECRET" "$(random_hex)"
+ensure_var "API_KEY_PEPPER" "$(random_hex)"
+ensure_var "CREDENTIAL_ENC_KEYS" "kid1:$(random_base64)"
+
+# Ensure bootstrap admin
+ensure_var "BOOTSTRAP_ADMIN_EMAIL" "admin@conduit.localhost"
+ensure_var "BOOTSTRAP_ADMIN_PASSWORD" "$(random_hex)"
+
+# Ensure GEMINI_API_KEY (never overwrite if present, defaults to empty or env if absent)
+ensure_var "GEMINI_API_KEY" "${GEMINI_API_KEY:-}"
+ensure_var "GEMINI_MODEL" "gemini-2.5-flash"
+
+# Ensure MongoDB credentials
+ensure_var "MONGO_ROOT_USER" "root"
+ensure_var "MONGO_ROOT_PASSWORD" "$(random_hex)"
+ensure_var "MONGO_USER" "conduit"
+ensure_var "MONGO_PASSWORD" "$(random_hex)"
+ensure_var "MONGO_DB" "conduit"
+
+# Source to safely build MONGO_URI if missing
+set -a
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+set +a
+
+ensure_var "MONGO_URI" "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@conduit-mongodb:27017/${MONGO_DB}?authSource=${MONGO_DB}"
+
+# Ensure Woo & MariaDB secrets
+ensure_var "WOO_MCP_BEARER_TOKEN" "$(random_hex)"
+ensure_var "MARIADB_ROOT_PASSWORD" "$(random_hex)"
+ensure_var "MARIADB_PASSWORD" "$(random_hex)"
+ensure_var "WP_ADMIN_PASSWORD" "$(random_hex)"
+ensure_var "WP_CONSUMER_KEY" "ck_$(random_hex | head -c 40)"
+ensure_var "WP_CONSUMER_SECRET" "cs_$(random_hex | head -c 40)"
+
+# Re-source after ensuring all variables
+set -a
+# shellcheck source=/dev/null
+source "$ENV_FILE"
+set +a
 
 # If kubectl is available and can reach a cluster, create Kubernetes Secrets
 if kubectl cluster-info >/dev/null 2>&1; then
   echo "Active Kubernetes cluster detected. Syncing Secrets..."
-  set -a
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-  set +a
 
   kubectl create namespace conduit-system --dry-run=client -o yaml | kubectl apply -f -
   kubectl label namespace conduit-system \

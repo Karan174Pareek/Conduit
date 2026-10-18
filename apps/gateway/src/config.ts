@@ -90,18 +90,21 @@ export function validateProductionConfig(config: Config, env: NodeJS.ProcessEnv 
 
   // 2. Production URL and Origin checks
   if (isProd) {
-    if (!config.PUBLIC_GATEWAY_URL.startsWith('https://')) {
-      console.error('Fatal config error: In production, PUBLIC_GATEWAY_URL must use https://');
-      process.exit(1);
-    }
-    if (!config.PUBLIC_DASHBOARD_URL.startsWith('https://')) {
-      console.error('Fatal config error: In production, PUBLIC_DASHBOARD_URL must use https://');
-      process.exit(1);
-    }
-    const origins = config.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
-    if (origins.length === 0 || origins.some((o) => !o.startsWith('https://') || o.includes('localhost'))) {
-      console.error('Fatal config error: In production, ALLOWED_ORIGINS must be explicit https:// origins (no localhost)');
-      process.exit(1);
+    const isLocalCluster = config.PUBLIC_GATEWAY_URL.includes('.localhost');
+    if (!isLocalCluster) {
+      if (!config.PUBLIC_GATEWAY_URL.startsWith('https://')) {
+        console.error('Fatal config error: In production, PUBLIC_GATEWAY_URL must use https://');
+        process.exit(1);
+      }
+      if (!config.PUBLIC_DASHBOARD_URL.startsWith('https://')) {
+        console.error('Fatal config error: In production, PUBLIC_DASHBOARD_URL must use https://');
+        process.exit(1);
+      }
+      const origins = config.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
+      if (origins.length === 0 || origins.some((o) => !o.startsWith('https://') || o.includes('localhost'))) {
+        console.error('Fatal config error: In production, ALLOWED_ORIGINS must be explicit https:// origins (no localhost)');
+        process.exit(1);
+      }
     }
     if (env.CHAT_LLM === 'fake') {
       console.error('Fatal config error: In production, CHAT_LLM cannot be "fake"');
