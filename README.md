@@ -1,97 +1,270 @@
-# Conduit — Team MCP Gateway + WooCommerce Hosting on Kubernetes
+# Conduit — Team MCP Gateway + WooCommerce on Kubernetes
 
-Conduit is a production-grade team MCP (Model Context Protocol) gateway paired with automated WooCommerce hosting on Kubernetes.
+Conduit is a production-grade **Team Model Context Protocol (MCP) Gateway** paired with automated WooCommerce hosting on Kubernetes. It enables organizations to securely connect, govern, rate-limit, and audit upstream MCP microservices behind a unified, zero-trust HTTP front door and autonomous AI chat agent.
 
-It allows teams to connect and govern upstream MCP servers behind a single authenticated, audited, and policy-governed MCP endpoint and interactive chat agent.
+```
+                   +-------------------------------------------------------+
+                   |                 Client Applications                   |
+                   |   Claude Code  |  Cursor  |  Web UI  | MCP Inspector  |
+                   +-------------------------------------------------------+
+                                              |
+                                              | Bearer mcpgw_<prefix>_<secret>
+                                              v
++------------------------------------------------------------------------------------------+
+|  Kubernetes Ingress (Traefik) - TLS Termination, HSTS, Rate Limiting, CORS               |
++------------------------------------------------------------------------------------------+
+       |                                      |                                   |
+       | /api, /mcp                           | / (UI)                            | (Storefront)
+       v                                      v                                   v
++-----------------------------+     +-------------------+     +----------------------------+
+|  conduit-gateway (Fastify)  |     | conduit-dashboard |     | store-default (WooCommerce)|
+|  - Authenticator & Tokens   |     | (Vite / React)    |     | - WordPress 6.7.2 Apache   |
+|  - SSRF Guard (Custom Agent)|     +-------------------+     | - MariaDB 11 StatefulSet   |
+|  - Policy Engine (§5.6)     |                               | - woo-mcp (REST adapter)   |
+|  - ToolRouter & Sanitizer   |                               +----------------------------+
+|  - Rate Limiter & Audit     |
+|  - Chat Agent (Gemini/Fake) |
++-----------------------------+
+       |                  |
+       v                  v
++----------------+  +----------------------------------------------------------------------+
+| MongoDB        |  | Internal MCP Microservices (conduit-system)                          |
+| - Users & Keys |  | - notes-mcp (Shared Team Notes with Atomic PVC Storage)              |
+| - Audit & TTL  |  | - utils-mcp (Deterministic AST Math Sandbox, Zero eval/Function)     |
++----------------+  +----------------------------------------------------------------------+
+```
 
-## Documentation Index
+---
 
-The canonical specifications and design documents live in [`docs/`](docs/):
+## 1. Documentation Index
 
-| Document | Purpose |
+Detailed specifications and architectural guides live in [`docs/`](docs/):
+
+| Document | Description |
 |---|---|
-| [docs/PRD.md](docs/PRD.md) | Product scope, user stories, personas, functional requirements, and Definition of Done traceability |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System components, sequence flows, Kubernetes topology, Helm chart architecture, and design tradeoffs |
-| [docs/DATABASE.md](docs/DATABASE.md) | MongoDB collections, indexing strategy, TTL retention, and state machines |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, trust boundaries, credential handling, SSRF defense, and Kubernetes hardening checklist |
-| [docs/ERROR_HANDLING.md](docs/ERROR_HANDLING.md) | Error taxonomy, timeouts/deadlines, circuit breaker & bulkhead rules, and retries |
-| [docs/PHASES.md](docs/PHASES.md) | 14-day implementation plan, phase-by-phase deliverables, exit criteria, and demo script |
-| [docs/PROMPTS.md](docs/PROMPTS.md) | Chat agent prompts, meta-tools definitions, and interview review prompts |
-| [docs/README.md](docs/README.md) | Original brief notes, spikes, and conventions |
+| [docs/STANDOUTS.md](docs/STANDOUTS.md) | Verified architectural highlights, code citations, and test names |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Formal threat model, four required topics, and production hardening changes |
+| [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | Deep-dive architecture choices, routing, circuit breakers, and bulkhead design |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Secret rotation playbooks, disaster recovery restore drill, scaling, and incident response |
+| [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md) | Single-node k3s VPS production setup, cert-manager, GHCR secrets, and local vs. prod table |
+| [docs/VIDEO_SCRIPT.md](docs/VIDEO_SCRIPT.md) | Timed 12–15 minute video recording script with exact terminal commands and UI actions |
+| [docs/PRD.md](docs/PRD.md) | Product scope, user personas, requirements, and Definition-of-Done criteria (§7) |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security controls, credential handling, and Kubernetes hardening checklist |
 
 ---
 
-## Environment & Prerequisites
+## 2. Environment Setup & Prerequisites
 
-- **Host OS**: Windows with WSL2 (Docker Desktop installed with WSL integration enabled).
-- **Node.js**: v22+ (TypeScript strict mode, npm workspaces).
-- **Cluster**: `k3d` locally, `k3s` on production VPS.
-- **Package Management**: Helm charts only (`charts/conduit`, `charts/woocommerce-store`).
+### 2.1 Host Requirements
+- **Operating System**: Windows 11 with WSL2 (Ubuntu 24.04 LTS).
+- **Runtime**: Node.js 22 LTS, npm 10+.
+- **Containers & Cluster**: Docker Desktop with WSL2 integration, `k3d` v5+, `kubectl`, `helm` v3.14+.
+- **Testing Tools**: Playwright browser binaries (`npx playwright install chromium`).
 
-### Local Domains & Port Mapping
+### 2.2 Local Domain Resolution (`/etc/hosts`)
+Conduit uses `*.localhost` domains routed via Traefik Ingress:
+- `dashboard.localhost` -> Team Management & Chat Dashboard
+- `gateway.localhost` -> Stateless Streamable HTTP MCP Front Door (`/mcp`, `/api`)
+- `shop.localhost` -> WooCommerce Storefront & WP Admin
 
-- **Domains**: Ingress routes services on `*.localhost`:
-  - `dashboard.localhost` -> Gateway Web UI
-  - `gateway.localhost` -> Stateless Streamable HTTP MCP Front Door (`/mcp`)
-  - `shop.localhost` -> WooCommerce Storefront & WP Admin
-- Modern web browsers natively resolve `*.localhost` to `127.0.0.1`.
-- **Hosts-file Fallback**: If CLI tools (e.g. `curl`, Node) or local resolvers in Windows or WSL do not automatically resolve `*.localhost` subdomains, add the following static entries:
-  - **Windows** (`C:\Windows\System32\drivers\etc\hosts`):
-    ```hosts
-    127.0.0.1 dashboard.localhost gateway.localhost shop.localhost whoami.localhost
-    ::1       dashboard.localhost gateway.localhost shop.localhost whoami.localhost
-    ```
-  - **WSL / Linux** (`/etc/hosts`):
-    ```hosts
-    127.0.0.1 dashboard.localhost gateway.localhost shop.localhost whoami.localhost
-    ::1       dashboard.localhost gateway.localhost shop.localhost whoami.localhost
-    ```
-  - Alternatively, configure wildcards via `global.domain=127.0.0.1.nip.io`.
-- **Port 80**: Bound directly to the k3d load balancer (`80:80@loadbalancer`). If port 80 is occupied, set `global.publicPort=8080`.
+Add these static entries to both hosts files:
+- **Windows** (`C:\Windows\System32\drivers\etc\hosts` as Administrator):
+  ```hosts
+  127.0.0.1 dashboard.localhost gateway.localhost shop.localhost
+  ::1       dashboard.localhost gateway.localhost shop.localhost
+  ```
+- **WSL2** (`/etc/hosts`):
+  ```hosts
+  127.0.0.1 dashboard.localhost gateway.localhost shop.localhost
+  ::1       dashboard.localhost gateway.localhost shop.localhost
+  ```
 
 ---
 
-## Quickstart & Verification
+## 3. Quickstart & Makefile Targets
 
-1. **Install dependencies and run tests**:
-   ```bash
-   npm install
-   npm run test
-   npm run typecheck
-   ```
+### 3.1 Bootstrap Cluster from Zero
+```bash
+# 1. Install workspace dependencies
+npm install
 
-2. **Generate local development secrets**:
-   ```bash
-   ./scripts/gen-secrets.sh
-   ```
+# 2. Generate cryptographically random local secrets (.env)
+./scripts/gen-secrets.sh
 
-3. **Start local cluster (once Docker Desktop is running)**:
-   ```bash
-   make cluster-up
-   ```
+# 3. Create k3d cluster with multi-port ingress mapping
+make cluster-up
 
-4. **Deploy all local components**:
-   ```bash
-   make deploy-local
-   ```
+# 4. Synchronize Kubernetes secrets from .env
+make secrets
 
-5. **Run Phase 3 Gateway & Team Management E2E Verification**:
-   ```bash
-   make e2e-gateway
-   ```
-   This executes the complete end-to-end integration flow across:
-   - Admin bootstrap credential retrieval & login
-   - Member invite lifecycle (72h single-use token, Argon2id password hash)
-   - API key issuance (`mcpgw_...`)
-   - Stateless Streamable HTTP MCP front door invocation (`/mcp` tools/list and tools/call)
-   - Asynchronous bounded queue audit logging (`/api/audit`)
-   - CSV audit export with spreadsheet formula injection protection
-   - Immediate member deactivation & self-demote / last-active-admin protection
+# 5. Build and deploy all local components (Gateway, Dashboard, Store, Upstreams)
+make deploy-local
+```
+
+### 3.2 Key Makefile Target Catalog
+| Target | Description |
+|---|---|
+| `make cluster-up` | Provisions local k3d cluster with load balancer on port 80/443 |
+| `make cluster-down` | Deletes local k3d cluster and cleans up resources |
+| `make secrets` | Provisions `conduit-secrets` and `store-secrets` in Kubernetes from `.env` |
+| `make deploy-local` | Deploys `conduit` and `woocommerce-store` charts to the cluster |
+| `make test` | Executes full Vitest suite in parallel against an isolated throwaway Docker MongoDB |
+| `make typecheck` | Validates TypeScript compilation across all workspace packages (`tsc --noEmit`) |
+| `make e2e-dod` | Runs the full PRD §7 Definition of Done automated verification suite (9 rows) |
+| `make e2e-gateway` | Comprehensive HTTP MCP protocol, SSE streaming, and resilience suite |
+| `make e2e-ui` | Automated Playwright browser smoke tests against dashboard and storefront |
 
 ---
 
-## Security & Hardening Exceptions
+## 4. First Login & Password Change
 
-- **WordPress Container User (Trivy DS-0002)**: The official WordPress (`wordpress:6.7.2-apache`) image starts as root to bind port 80 and setuid to `www-data` (UID 33). This is a documented exception (see [docs/SECURITY.md §7](docs/SECURITY.md#7-kubernetes-hardening-checklist)). Mitigations: drop all capabilities except the minimal required set (`CHOWN, FOWNER, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE`), enforce seccomp `RuntimeDefault`, disable `automountServiceAccountToken`, enforce default-deny `NetworkPolicy`, configure `readOnlyRootFilesystem: true` with isolated `tmpfs` mounts, and run within the `baseline` Pod Security Standard. Scoped ignore configured in `.trivyignore.yaml`.
+In accordance with enterprise security policy, fresh cluster deployments flag the bootstrap admin with `mustChangePassword: true`. All platform API calls are blocked with HTTP 403 `password_change_required` until updated.
 
+1. Retrieve the bootstrap admin credentials:
+   ```bash
+   # Email: admin@conduit.localhost
+   kubectl get secret conduit-secrets -n conduit-system \
+     -o jsonpath="{.data.BOOTSTRAP_ADMIN_PASSWORD}" | base64 -d | cut -c1-4 && echo "***"
+   ```
+2. Navigate to **[http://dashboard.localhost](http://dashboard.localhost)**.
+3. Sign in with the retrieved password.
+4. You will be redirected to `/change-password`. Set a new compliant password (minimum 12 characters, checked against common denylists).
+5. Upon submission, all legacy sessions are revoked, an immutable `admin_event` is logged, and the dashboard unlocks.
 
+---
+
+## 5. Placing a Storefront Order
+
+WooCommerce runs natively inside the cluster (`shop.localhost`):
+1. Open **[http://shop.localhost](http://shop.localhost)** in your browser.
+2. Select any product in the catalog and click **Add to cart**.
+3. Proceed to **Checkout** (`http://shop.localhost/checkout/`).
+4. Fill in billing details, select **Cash on delivery (COD)**, and click **Place order**.
+5. The order is immediately processed and visible in WordPress Admin (`http://shop.localhost/wp-admin`) and queryable via the MCP Gateway.
+
+---
+
+## 6. Team Governance & API Key Issuance
+
+1. **Invite Members**:
+   - In the Dashboard, navigate to **Team** (`/team`) and click **Invite Member**.
+   - Enter the member's email and select their role (`member` or `admin`).
+   - Copy the single-use invite link (`/accept-invite?token=...`) valid for 72 hours.
+2. **Issue Member API Keys**:
+   - As a member, navigate to **Account > API Keys** (`/keys`).
+   - Click **Create API Key** and assign a descriptive label.
+   - **One-Time Secret Reveal**: Copy the token (`mcpgw_<prefix>_<secret>`). The secret is hashed with HMAC-SHA256 and `API_KEY_PEPPER` before storing; it is never viewable again.
+
+---
+
+## 7. Connecting External MCP Clients
+
+Conduit provides a single **Streamable HTTP MCP Front Door** (`http://gateway.localhost/mcp`). Client tools authenticate with their Conduit Bearer Token.
+
+### 7.1 Claude Code
+Add Conduit using the CLI or direct configuration:
+```bash
+claude mcp add conduit http://gateway.localhost/mcp \
+  --header "Authorization: Bearer mcpgw_YOUR_KEY_HERE"
+```
+Or in `~/.claude.json`:
+```json
+{
+  "mcpServers": {
+    "conduit": {
+      "type": "http",
+      "url": "http://gateway.localhost/mcp",
+      "headers": {
+        "Authorization": "Bearer mcpgw_YOUR_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+### 7.2 Cursor IDE
+1. Open **Cursor Settings** > **Features** > **MCP**.
+2. Click **+ Add New MCP Server**.
+3. Configure the server:
+   - **Type**: `http` (or `sse`)
+   - **Name**: `conduit`
+   - **Server URL**: `http://gateway.localhost/mcp`
+   - **Headers**:
+     ```json
+     {
+       "Authorization": "Bearer mcpgw_YOUR_KEY_HERE"
+     }
+     ```
+4. Save and verify that aggregated tools appear with green status indicators.
+
+### 7.3 MCP Inspector
+Inspect and interact with tools using the official Model Context Protocol Inspector:
+```bash
+npx @modelcontextprotocol/inspector
+```
+In the Inspector web interface:
+- **Transport Type**: `Streamable HTTP` (or `SSE`)
+- **URL**: `http://gateway.localhost/mcp`
+- **Custom Header**: `Authorization: Bearer mcpgw_YOUR_KEY_HERE`
+- Click **Connect** to explore aggregated tools across WooCommerce, Notes, and Utils.
+
+---
+
+## 8. Interactive AI Chat Agent & Governance
+
+Conduit features a conversational AI agent (`/chat`) capable of autonomous planning and multi-upstream tool orchestration:
+- **Streaming Responses**: Token streaming powered by Server-Sent Events (SSE).
+- **Destructive Tool Confirmation Gate**: In accordance with production values (`chat.confirmDestructive: true`), mutating operations (e.g. `woo__create_product`, `woo__update_order_status`) present an interactive **Approve / Deny** prompt before execution.
+- **Multi-Server Workflows**: The agent can autonomously coordinate actions across services (e.g. creating a WooCommerce product and logging a team note in `notes-mcp` within a single conversation turn).
+
+---
+
+## 9. Automated Testing & Verification
+
+Conduit enforces rigorous automated test coverage:
+
+```bash
+# 1. Parallel Unit & Integration Tests (Throwaway Docker MongoDB)
+make test
+
+# 2. PRD §7 Definition of Done Verification (Real Playwright + Live Cluster)
+make e2e-dod
+
+# 3. Gateway MCP Protocol Verification (SSE, Tools, Bulkheads, Limits)
+make e2e-gateway
+
+# 4. Playwright Browser E2E UI Smoke Test
+make e2e-ui
+```
+
+---
+
+## 10. Upgrades, Rollbacks & VPS Production
+
+### 10.1 Upgrades & Atomic Rollback
+Deploy updates with Helm using the `--atomic` flag to ensure automatic rollback on failure:
+```bash
+helm upgrade conduit charts/conduit \
+  --namespace conduit-system \
+  --values charts/conduit/values.yaml \
+  --atomic \
+  --timeout 180s
+```
+Manual rollback to a prior revision:
+```bash
+helm rollback conduit <REVISION_NUMBER> -n conduit-system
+```
+
+### 10.2 Production VPS Deployment
+For deploying on a public single-node Linux VPS using k3s, Let's Encrypt TLS via cert-manager, firewall rules, and container registries, consult the comprehensive guide in [`docs/DEPLOY_VPS.md`](docs/DEPLOY_VPS.md).
+
+---
+
+## 11. Troubleshooting
+
+| Symptom | Probable Cause | Diagnostic & Resolution |
+|---|---|---|
+| `curl: (6) Could not resolve host` | Missing `*.localhost` entry in `/etc/hosts` | Ensure `127.0.0.1 gateway.localhost dashboard.localhost shop.localhost` is present in both Windows and WSL `/etc/hosts`. |
+| Upstream server shows `unreachable` | Pod failure or SSRF allowlist mismatch | Check `kubectl get pods -n conduit-system`. Verify target host matches `SSRF_ALLOWLIST_HOSTS` in Helm config. |
+| HTTP 403 `password_change_required` | Bootstrap admin forced password policy | Sign in via Web UI at `dashboard.localhost` and update password at `/change-password`. |
+| Playwright test timeout | Storefront initial page load or block checkout | Ensure WooCommerce coming soon mode is disabled (`wp option update woocommerce_coming_soon 'no'`). |
