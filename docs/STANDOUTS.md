@@ -1,78 +1,107 @@
 # Conduit — Architectural Standouts & Technical Highlights
 
-Conduit was engineered from day one as a production-grade, enterprise-ready Model Context Protocol (MCP) gateway and governance platform. This document highlights key design decisions and security standouts implemented across the codebase.
+This document details verified, production-ready security and architectural standouts implemented across Conduit. Every feature listed here is actively running in the codebase, with citations to exact source files and automated test suites.
 
 ---
 
-## 1. Unified Streamable HTTP MCP Front Door
-
-Instead of requiring individual team members to configure raw command-line subprocesses (`stdio`) with local credentials on their workstations, Conduit exposes a single **Streamable HTTP MCP endpoint** (`http://gateway.localhost/mcp`).
-
-- **Dual Format Support**: Gracefully supports both standard JSON-RPC 2.0 HTTP POST requests and Server-Sent Events (SSE) streaming streams.
-- **Dynamic Multi-Server Namespace Aggregation**: Upstream tools are automatically aggregated and namespaced (e.g. `woo__list_orders`, `notes__notes_create`, `utils__utils_calculate`), preventing collisions across diverse backends.
-- **Zero Local Credential Exposure**: Client applications (Cursor, Claude Desktop, autonomous agents) only ever hold a single Conduit Bearer Token. Upstream API keys, WooCommerce consumer secrets, and database credentials never touch client machines.
-
----
-
-## 2. Zero-Trust Security Architecture
-
-### Cryptographic API Key Hashing with Pepper
-- API keys follow the format `mcpgw_<prefix>_<secret>`.
-- The secret token is hashed using **HMAC-SHA256 with a dedicated server-side secret pepper** (`API_KEY_PEPPER`).
-- Even in the event of an unauthorized database dump, attacker pre-computed rainbow tables and dictionary attacks are completely ineffective.
-- One-time reveal on key generation ensures secrets cannot be retrieved from the server or UI once dismissed.
-
-### AES-256-GCM Credential Encryption at Rest
-- Sensitive upstream server authentication credentials (e.g. Bearer tokens, HTTP basic auth headers) are encrypted at rest using **AES-256-GCM** with authenticated key identifiers (`kid`) for seamless zero-downtime key rotation.
-
-### Enterprise Password Security with Argon2id
-- User passwords are protected using the state-of-the-art **Argon2id** algorithm (RFC 9106) configured with memory-hard parameters (`m=19456`, `t=2`, `p=1`).
-- Immune to GPU-accelerated cracking and ASIC attacks.
-
-### Spreadsheet Formula Neutralization (CSV Injection Defense)
-- Exporting audit logs to CSV poses a severe risk of formula injection (CWE-1236 / Excel Macro Execution) if an attacker crafts malicious tool names or input arguments starting with `=`, `+`, `-`, or `@`.
-- Conduit implements automatic cell neutralization: any cell beginning with dangerous formula prefixes is automatically escaped with a leading apostrophe (`'`), neutralizing the payload before CSV compilation.
+## 1. Full Multi-Layer SSRF Defense Guard
+- **Source Files**: 
+  - Implementation: [`apps/gateway/src/registry/ssrf.ts`](file:///home/karan/conduit/apps/gateway/src/registry/ssrf.ts), [`apps/gateway/src/registry/secure-fetch.ts`](file:///home/karan/conduit/apps/gateway/src/registry/secure-fetch.ts)
+  - Helm Configuration: [`charts/conduit/templates/configmap.yaml`](file:///home/karan/conduit/charts/conduit/templates/configmap.yaml)
+- **Verified Test**: 
+  - `apps/gateway/tests/ssrf.test.ts` (`SSRF Protection (Full RFC/Bogon/DNS Rebind Suite)`)
+- **Technical Capabilities**:
+  - **DNS Resolution Pre-Validation**: Uses custom lookup to resolve IP addresses before dialing; validates against IPv4/IPv6 private ranges, loopbacks (`127.0.0.0/8`, `::1`), link-local including cloud metadata (`169.254.169.254`, `fe80::/10`), Carrier-Grade NAT (`100.64.0.0/10`), multicast (`224.0.0.0/4`, `ff00::/8`), and IPv4-mapped IPv6 (`::ffff:127.0.0.1`).
+  - **DNS Rebinding & Decimal/Octal IP Defense**: Converts non-standard IP notations (hex, octal, single-integer) into canonical IP strings prior to range evaluation.
+  - **Direct Pinning & Redirect Prohibition**: Custom Undici Agent dials directly to the validated IP, passing the original `Host` header to prevent DNS rebinding TOCTOU attacks. HTTP redirects are strictly disabled (`maxRedirections: 0`).
+  - **In-Cluster First-Party Allowlist**: Configurable via `SSRF_ALLOWLIST_HOSTS` in Helm, permitting only explicitly registered in-cluster microservices (`*.conduit-system.svc.cluster.local`, `*.store-default.svc.cluster.local`).
 
 ---
 
-## 3. Autonomous Chat Agent with Safety Rails
-
-The Conduit interactive chat agent (`/chat`) features a multi-turn tool execution engine with enterprise safety rails:
-
-- **Schema Sanitization**: Upstream JSON schemas frequently contain keywords unsupported by frontier LLM function calling APIs (`$schema`, `additionalProperties`, `$defs`, nested `anyOf`). Conduit's schema sanitizer flattens and normalizes schemas into strict Gemini/OpenAI-compatible function declarations.
-- **Infinite Loop Detection**: Autonomous agents risk entering runaway recursive execution when tools fail. Conduit actively inspects execution history: if 3 consecutive identical tool calls with identical arguments are detected, the loop is terminated immediately with an explanatory user alert.
-- **Hard Turn Caps & Deadlines**:
-  - Maximum of **8 tool execution iterations** per conversational turn.
-  - Strict **90-second overall turn deadline**.
-  - Maximum of **4 parallel tool calls** per iteration.
-- **Concurrency Guard**: Strict 1-active-turn-per-user concurrency lock prevents runaway SSE connections and returns a deterministic `409 Conflict`.
-
----
-
-## 4. Multi-Tenant Data Isolation at the Query Layer
-
-Conduit enforces strict role-based access control (RBAC) and data isolation:
-
-- **Member vs Admin Separation**:
-  - Members can only issue their own API keys, view their own audit logs, and access their own chat conversations.
-  - Admins govern upstream servers, invite/disable users, approve tool catalogs, and audit platform-wide activity.
-- **No Reliance on Client-Side Filtering**:
-  - All database queries for conversations, messages, audit logs, and keys inject `userId: principal.userId` at the database driver layer.
-  - Automated tests verify that cross-tenant access attempts return strict `404 Not Found` responses, never leaking existence or metadata.
+## 2. Fine-Grained Tool Permissions Policy Engine (§5.6)
+- **Source Files**:
+  - Policy Engine: [`apps/gateway/src/auth/policy-engine.ts`](file:///home/karan/conduit/apps/gateway/src/auth/policy-engine.ts)
+  - Tool Router Enforcement: [`apps/gateway/src/registry/tool-router.ts`](file:///home/karan/conduit/apps/gateway/src/registry/tool-router.ts)
+- **Verified Test**:
+  - `apps/gateway/tests/policies-and-rate-limits.test.ts` (`Tool Permissions Engine (§5.6) > enforces read-only shortcut: member can call list_orders, cannot call create_product/update_order_status`, `honours evaluation order: user deny > user allow > role deny > role allow`)
+- **Technical Capabilities**:
+  - **Strict Evaluation Order**: Evaluates permissions via deterministic hierarchy: `User Deny` > `User Allow` > `Role Deny` > `Role Allow` > `Members Read-Only Shortcut` > `Default Allow`.
+  - **Information-Leaking Attack Prevention**: When a tool is forbidden for a member, it is completely hidden from `tools/list`. If invoked directly via `tools/call`, it returns the exact same `"Unknown tool"` error as a non-existent tool, preventing attackers from probing internal API surfaces.
+  - **Read-Only Shortcut**: Built-in regex classification automatically restricts members to safe operations (`list_*`, `get_*`, `read_*`, `view_*`, `calculate`, etc.) while blocking mutations (`create_*`, `update_*`, `delete_*`, `write_*`).
 
 ---
 
-## 5. Cloud-Native Kubernetes Topology & Non-Root Containers
+## 3. High-Performance Token Bucket Rate Limiting & Concurrency Guard
+- **Source Files**:
+  - Rate Limiter Middleware: [`apps/gateway/src/middleware/rate-limit.ts`](file:///home/karan/conduit/apps/gateway/src/middleware/rate-limit.ts)
+  - Gateway Setup: [`apps/gateway/src/app.ts`](file:///home/karan/conduit/apps/gateway/src/app.ts)
+- **Verified Test**:
+  - `apps/gateway/tests/policies-and-rate-limits.test.ts` (`F2 c) Rate Limiting & Concurrency > enforces token bucket rate limiter and reports retry-after seconds`, `enforces concurrency cap per user`)
+- **Technical Capabilities**:
+  - **Token Bucket Algorithm**: Configurable burst capacity and leak rate per user and per API key, returning `429 Too Many Requests` with a compliant `Retry-After` header.
+  - **Concurrency Guard**: Limits simultaneously executing MCP and chat requests per user, preventing resource starvation attacks across gateway replicas.
+  - **IP-Based Authentication Throttling**: Protects sensitive endpoints (`/api/auth/login`, `/api/auth/accept-invite`, `/api/auth/change-password`) against credential stuffing and brute force attempts.
 
-Conduit is built as a cloud-native platform deploying via Helm on `k3d` (local) and `k3s` (production VPS):
+---
 
-- **Non-Root Execution**:
-  - Gateway and Demo MCP servers run under dedicated unprivileged users (`UID 10001 / GID 10001`) with read-only root filesystems and dropped Linux capabilities.
-  - Dashboard runs via `nginx-unprivileged` on Alpine.
-- **Network Policy Hardening**:
-  - Kubernetes NetworkPolicies isolate namespaces and restrict ingress/egress.
-  - Gateway egress is strictly restricted to Kubernetes DNS, internal MongoDB, registered upstream MCP ports (3100, 3200, 3300), and HTTPS egress to the LLM API provider.
-- **High Availability & Fault Tolerance**:
-  - Horizontal Pod Autoscaler (HPA) configured for Gateway CPU scaling.
-  - Pod Disruption Budgets (PDB) ensure zero-downtime rolling upgrades.
-  - Automatic circuit breakers and health monitors detect upstream server failures and reflect status in real time.
+## 4. Zero-Downtime Credential Encryption Key Rotation
+- **Source Files**:
+  - Cryptographic Primitives: [`apps/gateway/src/crypto.ts`](file:///home/karan/conduit/apps/gateway/src/crypto.ts)
+  - Key Rotation Script: [`dev/rotate-credentials.ts`](file:///home/karan/conduit/dev/rotate-credentials.ts)
+- **Verified Test**:
+  - `apps/gateway/tests/policies-and-rate-limits.test.ts` (`F2 d) Credential Re-Encryption Rotation Drill > re-encrypts server credentials from old key to new active key idempotently`)
+- **Technical Capabilities**:
+  - **Key Identifiers (KID)**: Encrypted payloads serialize the active `kid` with the AES-256-GCM ciphertext, IV, and auth tag (`kid:iv:ciphertext:tag`).
+  - **Zero-Downtime Migration**: The gateway can decrypt credentials using any previously known key in `CREDENTIAL_ENC_KEYS` while encrypting new credentials with the primary active key.
+  - **Idempotent CLI Rotation**: `dev/rotate-credentials.ts` inspects all registered MCP servers, decrypts credentials with their matching legacy key, and re-encrypts them with the new primary key in an atomic MongoDB batch.
+
+---
+
+## 5. Bootstrap Forced Password Change & Session Lifecycle
+- **Source Files**:
+  - Auth Routes: [`apps/gateway/src/routes/auth.ts`](file:///home/karan/conduit/apps/gateway/src/routes/auth.ts)
+  - Authenticator: [`apps/gateway/src/auth/authenticator.ts`](file:///home/karan/conduit/apps/gateway/src/auth/authenticator.ts)
+  - Frontend Pages: [`apps/dashboard/src/pages/ChangePasswordPage.tsx`](file:///home/karan/conduit/apps/dashboard/src/pages/ChangePasswordPage.tsx), [`apps/dashboard/src/pages/AccountPage.tsx`](file:///home/karan/conduit/apps/dashboard/src/pages/AccountPage.tsx)
+- **Verified Test**:
+  - `apps/gateway/tests/password.test.ts` (`POST /api/auth/change-password`)
+  - `dev/e2e/dod.ts` (`Row 1: Admin bootstrap password change`)
+- **Technical Capabilities**:
+  - **Enforced Quarantine State**: Newly seeded bootstrap admins have `mustChangePassword: true`. All API endpoints (except `POST /api/auth/change-password`, `GET /api/auth/me`, and `POST /api/auth/logout`) respond with HTTP 403 `password_change_required`.
+  - **Strict Password Policy**: Rejects passwords under 12 characters and screens against common denylist passwords.
+  - **Global Session Revocation**: Successfully changing the password revokes all active sessions for the user and logs an immutable `admin_event`.
+
+---
+
+## 6. Real First-Party Microservices Architecture
+- **Source Files**:
+  - Notes MCP: [`apps/notes-mcp/src/server.ts`](file:///home/karan/conduit/apps/notes-mcp/src/server.ts)
+  - Utils MCP: [`apps/utils-mcp/src/server.ts`](file:///home/karan/conduit/apps/utils-mcp/src/server.ts), [`apps/utils-mcp/src/calculate.ts`](file:///home/karan/conduit/apps/utils-mcp/src/calculate.ts)
+- **Verified Tests**:
+  - `apps/utils-mcp/tests/calculate.test.ts` (`calculate parser & security tests`)
+  - `dev/e2e/dod.ts` (`Row 5: Coordinated operations across notes-mcp and utils-mcp with audit tracking`)
+- **Technical Capabilities**:
+  - **Shared Team Notes (`notes-mcp`)**: Stateful microservice mounting a persistent volume (`/data`). Implements atomic writes (`write to tmp + fsync + rename`), size and note count quotas, and strict schema validation.
+  - **Deterministic Math Engine (`utils-mcp`)**: Stateless microservice implementing a recursive-descent math AST parser. Zero use of JavaScript `eval()` or `Function()`, impervious to prototype pollution or code injection.
+
+---
+
+## 7. Tool Schema Sanitizer & Hidden Unicode Defense
+- **Source Files**:
+  - Implementation: [`apps/gateway/src/registry/schema-sanitizer.ts`](file:///home/karan/conduit/apps/gateway/src/registry/schema-sanitizer.ts)
+- **Verified Test**:
+  - `apps/gateway/tests/schema-sanitizer.test.ts` (`strips dangerous unicode and validates tool parameters`)
+- **Technical Capabilities**:
+  - **Zero-Width & BiDi Override Neutralization**: Strips invisible Unicode characters (`\u200B`, `\u200C`, `\u200D`, `\uFEFF`) and bidirectional control markers (`\u202A`–`\u202E`, `\u2066`–`\u2069`) that could disguise malicious prompt injections in tool descriptions.
+  - **JSON Schema Strictness**: Sanitizes upstream tool descriptions, limits string lengths, and ensures downstream LLMs receive unambiguous tool definitions.
+
+---
+
+## 8. Definition of Done End-to-End Test Suite
+- **Source File**: [`dev/e2e/dod.ts`](file:///home/karan/conduit/dev/e2e/dod.ts)
+- **Command**: `make e2e-dod`
+- **Verified Traceability**:
+  - All 9 rows of `docs/PRD.md §7` verified live against the Kubernetes cluster.
+  - Real Playwright browser automation for storefront ordering.
+  - External MCP client verification via standard JSON-RPC HTTP over Bearer token.
+  - Pod failure isolation and automated recovery verification.
+  - Complete multi-tenant isolation audit check (zero cross-user leakage).
