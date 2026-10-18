@@ -20,10 +20,10 @@ async function main() {
   process.on('SIGINT', () => void shutdown());
 
   await start();
-  process.stdout.write(`demo-utils-mcp running on http://${host}:${port}/mcp\n`);
+  process.stdout.write(`utils-mcp running on http://${host}:${port}/mcp\n`);
 }
 
 main().catch((err: Error) => {
-  process.stderr.write(`Failed to start demo-utils-mcp: ${err.message}\n`);
+  process.stderr.write(`Failed to start utils-mcp: ${err.message}\n`);
   process.exit(1);
 });

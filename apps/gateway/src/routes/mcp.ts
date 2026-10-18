@@ -55,6 +55,16 @@ export const mcpRoutes: FastifyPluginAsync<McpRouteOptions> = async (
     }
 
     const { user, key } = verified;
+
+    if (user.mustChangePassword) {
+      reply.status(403).send({
+        error: 'Forbidden',
+        code: 'password_change_required',
+        message: 'Password change is required before accessing MCP',
+      });
+      return;
+    }
+
     const principal: Principal = {
       userId: user._id.toString(),
       email: user.email,
@@ -62,6 +72,7 @@ export const mcpRoutes: FastifyPluginAsync<McpRouteOptions> = async (
       via: 'apikey',
       keyId: key._id?.toString(),
       source: 'mcp',
+      mustChangePassword: !!user.mustChangePassword,
     };
 
     // Low-level MCP SDK handler takes control of the HTTP response

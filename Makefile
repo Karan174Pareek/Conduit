@@ -43,10 +43,14 @@ build:
 	npm run build --workspace=@conduit/gateway
 	npm run build --workspace=@conduit/woo-mcp
 	npm run build --workspace=@conduit/dashboard
+	npm run build --workspace=@conduit/notes-mcp
+	npm run build --workspace=@conduit/utils-mcp
 	docker build -t conduit/wordpress:6.7.2-wc9.6.2 -t conduit/wordpress:$(GIT_SHA) images/wordpress
 	docker build -t conduit/woo-mcp:$(GIT_SHA) -t conduit/woo-mcp:latest -f apps/woo-mcp/Dockerfile .
 	docker build -t conduit/gateway:$(GIT_SHA) -t conduit/gateway:latest -t conduit/gateway:0.1.0 -f apps/gateway/Dockerfile .
 	docker build -t conduit/dashboard:$(GIT_SHA) -t conduit/dashboard:latest -t conduit/dashboard:0.1.0 -f apps/dashboard/Dockerfile .
+	docker build -t conduit/notes-mcp:$(GIT_SHA) -t conduit/notes-mcp:latest -f apps/notes-mcp/Dockerfile .
+	docker build -t conduit/utils-mcp:$(GIT_SHA) -t conduit/utils-mcp:latest -f apps/utils-mcp/Dockerfile .
 
 .PHONY: test
 test:
@@ -100,7 +104,7 @@ load:
 	k3d image import conduit/woo-mcp:$(GIT_SHA) conduit/woo-mcp:latest -c conduit
 	k3d image import conduit/gateway:$(GIT_SHA) conduit/gateway:latest conduit/gateway:0.1.0 -c conduit
 	k3d image import conduit/dashboard:$(GIT_SHA) conduit/dashboard:latest conduit/dashboard:0.1.0 -c conduit
-	k3d image import conduit/demo-notes-mcp:latest conduit/demo-utils-mcp:latest conduit/demo-rogue-mcp:latest -c conduit || true
+	k3d image import conduit/notes-mcp:$(GIT_SHA) conduit/notes-mcp:latest conduit/utils-mcp:$(GIT_SHA) conduit/utils-mcp:latest -c conduit || true
 
 .PHONY: deploy-local
 deploy-local: build load
@@ -120,14 +124,14 @@ e2e:
 .PHONY: e2e-gateway
 e2e-gateway:
 	@echo "Running Gateway E2E Flow..."
-	npx tsx scripts/e2e/gateway-flow.ts
+	npx tsx dev/e2e/gateway-flow.ts
 
 .PHONY: e2e-ui
 e2e-ui:
 	@echo "Running Phase 4 Dashboard Playwright smoke test..."
-	npx tsx scripts/e2e/ui-smoke.ts
+	npx tsx dev/e2e/ui-smoke.ts
 
 .PHONY: e2e-dod
 e2e-dod:
 	@echo "Running Definition of Done (DoD) verification..."
-	npx tsx scripts/e2e/dod.ts
+	npx tsx dev/e2e/dod.ts

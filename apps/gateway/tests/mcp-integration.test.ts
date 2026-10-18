@@ -243,6 +243,21 @@ describe('Phase 3B Gateway Core & /mcp Integration Tests', { timeout: 30000 }, (
     const adminCookie = loginRes.headers['set-cookie'] as string;
     const adminCsrf = loginRes.json().csrfToken;
 
+    // Change password from bootstrap default
+    await app1.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: adminCookie,
+        'x-csrf-token': adminCsrf,
+        origin: 'http://dashboard.localhost',
+      },
+      payload: {
+        currentPassword: testConfig.BOOTSTRAP_ADMIN_PASSWORD,
+        newPassword: 'SuperSecurePassword2026!',
+      },
+    });
+
     const createRes = await app1.inject({
       method: 'POST',
       url: '/api/servers',

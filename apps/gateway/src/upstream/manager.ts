@@ -6,6 +6,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { McpServerDocument } from '../db/types.js';
 import { CredentialCrypto } from '../registry/crypto.js';
 import { CatalogService } from '../catalog/service.js';
+import { createSecureFetch } from '../registry/secure-fetch.js';
 import type {
   InvokeToolOptions,
   ToolInvocationResult,
@@ -166,7 +167,9 @@ export class UpstreamManager {
     }
 
     const transport = new StreamableHTTPClientTransport(new URL(state.server.url), {
-      requestInit: { headers },
+      fetch: createSecureFetch(),
+      requestInit: { headers, redirect: 'error' },
+      redirectPolicy: 'same-origin',
     });
 
     const client = new Client(

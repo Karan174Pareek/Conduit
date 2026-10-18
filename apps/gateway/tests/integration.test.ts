@@ -215,7 +215,38 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     const sessionCookie = loginRes.cookies[0];
     const { csrfToken } = loginRes.json();
 
-    // Create an API key
+    // 1. Gated access: before changing password, calling /api/keys is rejected with 403 password_change_required
+    const gatedRes = await app.inject({
+      method: 'POST',
+      url: '/api/keys',
+      headers: {
+        cookie: `session_id=${sessionCookie?.value}`,
+        'x-csrf-token': csrfToken,
+        origin: 'http://dashboard.localhost',
+      },
+      payload: { name: 'Blocked Key' },
+    });
+    expect(gatedRes.statusCode).toBe(403);
+    expect(gatedRes.json().code).toBe('password_change_required');
+
+    // 2. Perform required password change
+    const changePassRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: {
+        cookie: `session_id=${sessionCookie?.value}`,
+        'x-csrf-token': csrfToken,
+        origin: 'http://dashboard.localhost',
+      },
+      payload: {
+        currentPassword: testConfig.BOOTSTRAP_ADMIN_PASSWORD,
+        newPassword: 'SuperSecurePassword2026!',
+      },
+    });
+    expect(changePassRes.statusCode).toBe(200);
+    expect(changePassRes.json().ok).toBe(true);
+
+    // 3. Create an API key successfully after password change
     const createKeyRes = await app.inject({
       method: 'POST',
       url: '/api/keys',
@@ -375,7 +406,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
       url: '/api/auth/login',
       payload: {
         email: testConfig.BOOTSTRAP_ADMIN_EMAIL,
-        password: testConfig.BOOTSTRAP_ADMIN_PASSWORD,
+        password: 'SuperSecurePassword2026!',
       },
     });
     const adminCookie = loginAdmin.cookies[0]?.value;

@@ -13,16 +13,27 @@ export interface Principal {
   via: 'apikey' | 'session';
   keyId?: string | null;
   source?: 'mcp' | 'chat';
+  mustChangePassword?: boolean;
 }
 
 export interface PolicyEngine {
-  evaluate(principal: Principal, serverSlug: string, toolName: string): Promise<boolean>;
+  evaluate(
+    principal: Principal,
+    serverSlug: string,
+    toolName: string,
+    annotations?: Record<string, unknown>,
+    serverTrusted?: boolean,
+  ): Promise<boolean>;
 }
 
 export class DefaultPolicyEngine implements PolicyEngine {
-  async evaluate(_principal: Principal, _serverSlug: string, _toolName: string): Promise<boolean> {
-    // Phase 3B default: allow all tools.
-    // TODO (Phase 8): Evaluate DB-backed role/user policies with glob patterns and readOnly hints
+  async evaluate(
+    _principal: Principal,
+    _serverSlug: string,
+    _toolName: string,
+    _annotations?: Record<string, unknown>,
+    _serverTrusted?: boolean,
+  ): Promise<boolean> {
     return true;
   }
 }
@@ -123,7 +134,13 @@ export class ToolRouter {
         .toArray();
 
       for (const t of tools) {
-        const allowed = await this.policyEngine.evaluate(principal, server.slug, t.name);
+        const allowed = await this.policyEngine.evaluate(
+          principal,
+          server.slug,
+          t.name,
+          t.annotations,
+          server.trusted,
+        );
         if (!allowed) {
           continue;
         }
@@ -211,7 +228,13 @@ export class ToolRouter {
     }
 
     // Policy check
-    const allowed = await this.policyEngine.evaluate(principal, slug, catalogItem.name);
+    const allowed = await this.policyEngine.evaluate(
+      principal,
+      slug,
+      catalogItem.name,
+      catalogItem.annotations,
+      serverState.server.trusted,
+    );
     if (!allowed) {
       toolCallsCounter.inc({ server: slug, tool: catalogItem.name, status: 'denied' });
       errorsCounter.inc({ type: 'policy_denied', server: slug });

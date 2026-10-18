@@ -13,6 +13,7 @@ export default tseslint.config(
       'build/**',
       '**/*.d.ts',
       'scripts/**',
+      'dev/**',
     ],
   },
   {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const configSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
   HOST: z.string().default('0.0.0.0'),
   MONGO_URI: z.string().min(1, 'MONGO_URI is required'),
@@ -62,6 +63,56 @@ export function parseEncryptionKeys(keysString: string): EncryptionKey[] {
   });
 }
 
+const PLACEHOLDER_PATTERNS = ['changeme', 'placeholder', 'secret', 'password', '12345678', 'admin'];
+
+export function validateProductionConfig(config: Config, env: NodeJS.ProcessEnv = process.env): void {
+  const isProd = env.NODE_ENV === 'production';
+
+  // 1. Secrets check (>= 32 bytes and not placeholders)
+  const secretsToCheck: [string, string][] = [
+    ['SESSION_SECRET', config.SESSION_SECRET],
+    ['API_KEY_PEPPER', config.API_KEY_PEPPER],
+  ];
+
+  for (const [name, val] of secretsToCheck) {
+    if (val.length < 32) {
+      console.error(`Fatal config error: ${name} must be at least 32 characters long`);
+      process.exit(1);
+    }
+    const lower = val.toLowerCase();
+    for (const ph of PLACEHOLDER_PATTERNS) {
+      if (lower.includes(ph)) {
+        console.error(`Fatal config error: ${name} contains insecure placeholder value "${ph}"`);
+        process.exit(1);
+      }
+    }
+  }
+
+  // 2. Production URL and Origin checks
+  if (isProd) {
+    const isLocalCluster = config.PUBLIC_GATEWAY_URL.includes('.localhost');
+    if (!isLocalCluster) {
+      if (!config.PUBLIC_GATEWAY_URL.startsWith('https://')) {
+        console.error('Fatal config error: In production, PUBLIC_GATEWAY_URL must use https://');
+        process.exit(1);
+      }
+      if (!config.PUBLIC_DASHBOARD_URL.startsWith('https://')) {
+        console.error('Fatal config error: In production, PUBLIC_DASHBOARD_URL must use https://');
+        process.exit(1);
+      }
+      const origins = config.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
+      if (origins.length === 0 || origins.some((o) => !o.startsWith('https://') || o.includes('localhost'))) {
+        console.error('Fatal config error: In production, ALLOWED_ORIGINS must be explicit https:// origins (no localhost)');
+        process.exit(1);
+      }
+    }
+    if (env.CHAT_LLM === 'fake') {
+      console.error('Fatal config error: In production, CHAT_LLM cannot be "fake"');
+      process.exit(1);
+    }
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const result = configSchema.safeParse(env);
   if (!result.success) {
@@ -71,5 +122,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     console.error(`Fatal config error: ${issues}`);
     process.exit(1);
   }
+  validateProductionConfig(result.data, env);
   return result.data;
 }

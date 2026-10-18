@@ -4,6 +4,7 @@ import * as m0001 from './0001_init.js';
 import * as m0002 from './0002_fix_tool_catalog_indexes.js';
 import * as m0003 from './0003_audit_and_team.js';
 import * as m0004 from './0004_conversations.js';
+import * as m0005 from './0005_admin_events_ttl_and_policies.js';
 
 export interface Migration {
   version: number;
@@ -11,9 +12,9 @@ export interface Migration {
   up: (db: Db) => Promise<void>;
 }
 
-export const MIGRATIONS: Migration[] = [m0001, m0002, m0003, m0004];
+export const MIGRATIONS: Migration[] = [m0001, m0002, m0003, m0004, m0005];
 
-export const TARGET_SCHEMA_VERSION = 4;
+export const TARGET_SCHEMA_VERSION = 5;
 
 export interface SystemStateDoc {
   _id: string;

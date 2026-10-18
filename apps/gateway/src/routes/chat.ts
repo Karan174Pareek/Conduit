@@ -14,6 +14,7 @@ export interface ChatRouteOptions {
 const chatMessageSchema = z.object({
   message: z.string().min(1, 'Message is required').max(8192, 'Message cannot exceed 8192 characters'),
   conversationId: z.string().optional(),
+  confirmedToolCalls: z.array(z.string()).optional(),
 });
 
 export const chatRoutes: FastifyPluginAsync<ChatRouteOptions> = async (app, opts) => {
@@ -125,12 +126,14 @@ export const chatRoutes: FastifyPluginAsync<ChatRouteOptions> = async (app, opts
         userRole: req.principal!.role,
         conversationId: parseResult.data.conversationId,
         message: parseResult.data.message,
+        confirmedToolCalls: parseResult.data.confirmedToolCalls,
         signal: abortController.signal,
         callbacks: {
           onTurnStart: (d) => sendSse('turn_start', d),
           onTextDelta: (d) => sendSse('text_delta', d),
           onToolCall: (d) => sendSse('tool_call', d),
           onToolResult: (d) => sendSse('tool_result', d),
+          onConfirmRequired: (d) => sendSse('confirm_required', d),
           onError: (d) => sendSse('error', d),
           onDone: (d) => sendSse('done', d),
         },

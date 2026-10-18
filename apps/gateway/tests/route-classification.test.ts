@@ -25,6 +25,7 @@ const ROUTE_CLASSIFICATIONS: Record<string, RouteClassification> = {
   'POST /api/auth/accept-invite': 'public',
   'GET /api/config': 'public',
   'POST /api/auth/logout': 'session',
+  'POST /api/auth/change-password': 'session',
   'GET /api/auth/me': 'session',
   'GET /api/keys': 'session',
   'POST /api/keys': 'session',
@@ -49,6 +50,10 @@ const ROUTE_CLASSIFICATIONS: Record<string, RouteClassification> = {
   'POST /api/servers/:id/tools/approve': 'session+admin',
   'GET /api/admin-events': 'session+admin',
   'GET /api/stats/servers': 'session+admin',
+  'GET /api/policies': 'session',
+  'POST /api/policies': 'session+admin',
+  'DELETE /api/policies/:id': 'session+admin',
+  'POST /api/policies/settings': 'session+admin',
   'POST /mcp': 'mcp-key',
   'GET /mcp': 'public', // 405 Method Not Allowed
   'DELETE /mcp': 'public', // 405 Method Not Allowed
@@ -94,6 +99,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
   };
 
   beforeAll(async () => {
+    process.env.SSRF_ALLOWED_HOSTS = 'store-woocommerce-store-woo-mcp.store-default.svc.cluster.local';
     mongoClient = new MongoClient(testConfig.MONGO_URI);
     await mongoClient.connect();
     db = mongoClient.db(testConfig.MONGO_DB_NAME);
@@ -325,7 +331,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
       payload: {
         slug: `srv-${Date.now()}`,
         displayName: 'Actor Email Srv',
-        url: 'http://127.0.0.1:9099/mcp',
+        url: 'http://store-woocommerce-store-woo-mcp.store-default.svc.cluster.local:3100/mcp',
       },
     });
     expect(srvRes.statusCode).toBe(201);
