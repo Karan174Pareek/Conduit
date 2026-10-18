@@ -17,7 +17,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4.1.0
@@ -86,7 +86,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout Code (Full History for Gitleaks)
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
