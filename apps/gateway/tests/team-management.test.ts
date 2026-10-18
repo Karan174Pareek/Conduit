@@ -6,17 +6,13 @@ import { hashPassword } from '../src/services/password.js';
 import { createApiKey } from '../src/services/api-keys.js';
 import type { Config } from '../src/config.js';
 import type { InviteDocument } from '../src/db/types.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
 describe('Team Management & Invites Lifecycle', { timeout: 30000 }, () => {
   let client: MongoClient;
   let db: Db;
   let app: any;
-  const dbName = `test-team-${Date.now()}`;
-
-  const TEST_MONGO_URI =
-    process.env['TEST_MONGO_URI'] ||
-    process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
+  const { dbName, uri: TEST_MONGO_URI } = getIsolatedTestDbUri('team');
 
   const mockConfig: Config = {
     NODE_ENV: 'test',

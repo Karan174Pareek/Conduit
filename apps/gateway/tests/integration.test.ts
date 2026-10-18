@@ -5,11 +5,9 @@ import { bootstrapAdmin } from '../src/services/bootstrap.js';
 import { buildApp } from '../src/app.js';
 import type { Config } from '../src/config.js';
 import type { FastifyInstance } from 'fastify';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
-const TEST_MONGO_URI =
-  process.env['TEST_MONGO_URI'] ||
-  process.env['MONGO_URI'] ||
-  'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
+const { dbName: testDbName, uri: TEST_MONGO_URI } = getIsolatedTestDbUri('integration');
 
 describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () => {
   let mongoClient: MongoClient;
@@ -40,7 +38,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
       connectTimeoutMS: 5000,
     });
     await mongoClient.connect();
-    db = mongoClient.db();
+    db = mongoClient.db(testDbName);
 
     // Clean test database before test suite
     await db.dropDatabase();
@@ -49,6 +47,13 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
   afterAll(async () => {
     if (app) {
       await app.close();
+    }
+    if (db) {
+      try {
+        await db.dropDatabase();
+      } catch (_err) {
+        void _err;
+      }
     }
     if (mongoClient) {
       await mongoClient.close();

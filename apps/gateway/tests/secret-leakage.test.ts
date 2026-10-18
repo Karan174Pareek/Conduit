@@ -14,6 +14,7 @@ import { MongoAuditSink } from '../src/audit/sink.js';
 import { REDACTED_PATHS } from '../src/logger.js';
 import { hashPassword } from '../src/services/password.js';
 import type { McpServerDocument, UserDocument } from '../src/db/types.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
 describe('Integration Secret Leakage & Redaction Proof', { timeout: 30000 }, () => {
   let mongoClient: MongoClient;
@@ -26,11 +27,7 @@ describe('Integration Secret Leakage & Redaction Proof', { timeout: 30000 }, () 
   const KNOWN_ADMIN_PASSWORD = 'knownAdminSuperSecretPassword123!';
   const KNOWN_ADMIN_EMAIL = 'admin@conduit.localhost';
 
-  const rawMongoUri =
-    process.env['TEST_MONGO_URI'] ||
-    process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
-  const mongoUri = rawMongoUri.replace(/\/([^/?]+)(\?|$)/, `/conduit_secret_leak_${Date.now()}$2`);
+  const { dbName, uri: mongoUri } = getIsolatedTestDbUri('secret_leak');
 
   const testConfig: Config = {
     NODE_ENV: 'test',
@@ -53,7 +50,7 @@ describe('Integration Secret Leakage & Redaction Proof', { timeout: 30000 }, () 
   beforeAll(async () => {
     mongoClient = new MongoClient(testConfig.MONGO_URI);
     await mongoClient.connect();
-    db = mongoClient.db();
+    db = mongoClient.db(dbName);
 
     // Ephemeral mock upstream server verifying Bearer token
     await new Promise<void>((resolve) => {

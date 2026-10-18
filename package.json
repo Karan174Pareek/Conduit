@@ -17,7 +17,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run"
+    "test": "node dev/run-tests.mjs",
+    "test:vitest": "vitest run"
   },
   "devDependencies": {
     "@eslint/js": "9.21.0",

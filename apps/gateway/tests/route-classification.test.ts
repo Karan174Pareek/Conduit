@@ -13,6 +13,7 @@ import { hashPassword } from '../src/services/password.js';
 import { createSession } from '../src/services/sessions.js';
 import { createApiKey } from '../src/services/api-keys.js';
 import type { UserDocument, AdminEventDocument } from '../src/db/types.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
 type RouteClassification = 'public' | 'session' | 'session+admin' | 'mcp-key';
 
@@ -64,11 +65,13 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
   let testApp: FastifyInstance;
   const discoveredRoutes: Array<{ method: string; path: string }> = [];
 
+  const { dbName: testDbName, uri: testMongoUri } = getIsolatedTestDbUri('route_class');
+
   const testConfig: Config = {
     PORT: 3000,
     HOST: '0.0.0.0',
-    MONGO_URI: process.env.MONGO_URI || 'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin',
-    MONGO_DB_NAME: `conduit_test_route_class_${Date.now()}`,
+    MONGO_URI: testMongoUri,
+    MONGO_DB_NAME: testDbName,
     SESSION_SECRET: 'test-session-secret-must-be-at-least-32-chars-long!',
     CREDENTIAL_ENC_KEYS: 'k1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
     LOG_LEVEL: 'silent',
@@ -165,7 +168,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
 
   afterAll(async () => {
     if (testApp) await testApp.close();
-    if (db) await db.dropDatabase();
+    if (db) await db.dropDatabase().catch(() => {});
     if (mongoClient) await mongoClient.close();
   });
 
