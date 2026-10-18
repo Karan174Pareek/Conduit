@@ -1,0 +1,306 @@
+[
+  {
+    "page": "login",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": "button"
+  },
+  {
+    "page": "login",
+    "id": "landmark-one-main",
+    "impact": "moderate",
+    "description": "Ensure the document has a main landmark",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "login",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "login",
+    "id": "region",
+    "impact": "moderate",
+    "description": "Ensure all page content is contained by landmarks",
+    "nodesCount": 3,
+    "targetSample": ".text-center"
+  },
+  {
+    "page": "accept-invite",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": "button"
+  },
+  {
+    "page": "accept-invite",
+    "id": "landmark-one-main",
+    "impact": "moderate",
+    "description": "Ensure the document has a main landmark",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "accept-invite",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "accept-invite",
+    "id": "region",
+    "impact": "moderate",
+    "description": "Ensure all page content is contained by landmarks",
+    "nodesCount": 4,
+    "targetSample": ".text-center"
+  },
+  {
+    "page": "403",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": "button"
+  },
+  {
+    "page": "403",
+    "id": "landmark-one-main",
+    "impact": "moderate",
+    "description": "Ensure the document has a main landmark",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "403",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "403",
+    "id": "region",
+    "impact": "moderate",
+    "description": "Ensure all page content is contained by landmarks",
+    "nodesCount": 3,
+    "targetSample": ".text-center"
+  },
+  {
+    "page": "404",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": "button"
+  },
+  {
+    "page": "404",
+    "id": "landmark-one-main",
+    "impact": "moderate",
+    "description": "Ensure the document has a main landmark",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "404",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "404",
+    "id": "region",
+    "impact": "moderate",
+    "description": "Ensure all page content is contained by landmarks",
+    "nodesCount": 3,
+    "targetSample": ".text-center"
+  },
+  {
+    "page": "servers",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "servers-tool-diff",
+    "id": "aria-dialog-name",
+    "impact": "serious",
+    "description": "Ensure every ARIA dialog and alertdialog node has an accessible name",
+    "nodesCount": 1,
+    "targetSample": "div[role=\"dialog\"]"
+  },
+  {
+    "page": "servers-tool-diff",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "servers-tool-diff",
+    "id": "heading-order",
+    "impact": "moderate",
+    "description": "Ensure the order of headings is semantically correct",
+    "nodesCount": 1,
+    "targetSample": "h3"
+  },
+  {
+    "page": "team",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 2,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "team",
+    "id": "select-name",
+    "impact": "critical",
+    "description": "Ensure select element has an accessible name",
+    "nodesCount": 8,
+    "targetSample": ".hover\\:bg-slate-800\\/40:nth-child(1) > td:nth-child(2) > select"
+  },
+  {
+    "page": "api-keys",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 24,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "api-keys-modal",
+    "id": "aria-dialog-name",
+    "impact": "serious",
+    "description": "Ensure every ARIA dialog and alertdialog node has an accessible name",
+    "nodesCount": 1,
+    "targetSample": ".overflow-y-auto"
+  },
+  {
+    "page": "api-keys-modal",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 25,
+    "targetSample": ".sm\\:flex-row > .bg-emerald-600.hover\\:bg-emerald-500.focus\\:ring-emerald-500"
+  },
+  {
+    "page": "api-keys-modal",
+    "id": "heading-order",
+    "impact": "moderate",
+    "description": "Ensure the order of headings is semantically correct",
+    "nodesCount": 1,
+    "targetSample": "h3"
+  },
+  {
+    "page": "audit",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 25,
+    "targetSample": ".hover\\:bg-slate-800\\/40:nth-child(1) > .text-left:nth-child(3) > div > .text-\\[10px\\].text-slate-500.uppercase"
+  },
+  {
+    "page": "audit",
+    "id": "select-name",
+    "impact": "critical",
+    "description": "Ensure select element has an accessible name",
+    "nodesCount": 1,
+    "targetSample": "select"
+  },
+  {
+    "page": "connect",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "connect",
+    "id": "label",
+    "impact": "critical",
+    "description": "Ensure every form element has a label",
+    "nodesCount": 1,
+    "targetSample": "input"
+  },
+  {
+    "page": "connect",
+    "id": "scrollable-region-focusable",
+    "impact": "serious",
+    "description": "Ensure elements that have scrollable content are accessible by keyboard in Safari",
+    "nodesCount": 1,
+    "targetSample": ".space-y-3.p-5.rounded-xl:nth-child(6) > .text-cyan-400"
+  },
+  {
+    "page": "account",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 1,
+    "targetSample": ".bg-emerald-600"
+  },
+  {
+    "page": "account",
+    "id": "label-title-only",
+    "impact": "serious",
+    "description": "Ensure that every form element has a visible label and is not solely labeled using hidden labels, or the title or aria-describedby attributes",
+    "nodesCount": 1,
+    "targetSample": "input[aria-describedby=\"undefined-help\"]"
+  },
+  {
+    "page": "chat",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 11,
+    "targetSample": ".group.cursor-pointer.hover\\:bg-slate-900:nth-child(1) > .pr-2.flex-1.truncate > .text-\\[10px\\].mt-0\\.5.text-slate-500"
+  },
+  {
+    "page": "chat",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "chat-tool-card",
+    "id": "color-contrast",
+    "impact": "serious",
+    "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+    "nodesCount": 11,
+    "targetSample": ".border-slate-700\\/60 > .pr-2.flex-1.truncate > .text-\\[10px\\].mt-0\\.5.text-slate-500"
+  },
+  {
+    "page": "chat-tool-card",
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+    "nodesCount": 1,
+    "targetSample": "html"
+  },
+  {
+    "page": "chat-tool-card",
+    "id": "region",
+    "impact": "moderate",
+    "description": "Ensure all page content is contained by landmarks",
+    "nodesCount": 2,
+    "targetSample": ".pointer-events-auto.shadow-lg.items-start:nth-child(1) > .pr-2.flex-1"
+  }
+]
