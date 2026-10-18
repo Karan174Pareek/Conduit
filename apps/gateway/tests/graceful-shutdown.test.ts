@@ -7,18 +7,14 @@ import { createApiKey } from '../src/services/api-keys.js';
 import { hashPassword } from '../src/services/password.js';
 import type { Config } from '../src/config.js';
 import type { McpServerDocument, ToolCatalogDocument, ToolCallDocument } from '../src/db/types.js';
+import { getIsolatedTestDbUri } from './test-db-helper.js';
 
 describe('Graceful Shutdown In-Flight Request and Audit Proof', { timeout: 30000 }, () => {
   let client: MongoClient;
   let db: Db;
   let mockServer: http.Server;
   let mockServerUrl: string;
-  const dbName = `test-shutdown-${Date.now()}`;
-
-  const TEST_MONGO_URI =
-    process.env['TEST_MONGO_URI'] ||
-    process.env['MONGO_URI'] ||
-    'mongodb://root:rootpass@127.0.0.1:27017/conduit_test?authSource=admin';
+  const { dbName, uri: TEST_MONGO_URI } = getIsolatedTestDbUri('shutdown');
 
   const mockConfig: Config = {
     NODE_ENV: 'test',
