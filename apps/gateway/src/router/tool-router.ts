@@ -44,8 +44,7 @@ export interface RateLimiter {
 
 export class NoopRateLimiter implements RateLimiter {
   async consume(_key: string): Promise<{ allowed: boolean }> {
-    // Phase 3B default: no-op rate limiter.
-    // TODO (Phase 8): Token bucket rate limiter backed by memory or Redis
+    // Default no-op rate limiter fallback
     return { allowed: true };
   }
 }
