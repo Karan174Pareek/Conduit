@@ -90,11 +90,14 @@ export const inviteRoutes: FastifyPluginAsync<InviteRouteOptions> = async (
       details: { email: body.email, role: body.role, expiresAt },
     });
 
+    const origin = (request.headers.origin as string) || 'http://dashboard.localhost';
+    const inviteUrl = `${origin}/accept-invite?token=${rawToken}`;
     reply.status(201).send({
       id: inserted.insertedId.toString(),
       email: body.email,
       role: body.role,
       token: rawToken,
+      inviteUrl,
       expiresAt,
       invite: {
         id: inserted.insertedId.toString(),

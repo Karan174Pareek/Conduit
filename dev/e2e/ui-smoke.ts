@@ -68,6 +68,10 @@ async function runUiSmoke() {
   const page = await context.newPage();
 
   const cspViolations: string[] = [];
+  page.on('dialog', async (dialog) => {
+    await dialog.accept();
+  });
+
   page.on('console', (msg: ConsoleMessage) => {
     const text = msg.text();
     if (
@@ -98,6 +102,55 @@ async function runUiSmoke() {
     await page.screenshot({ path: path.join(screenshotDir, '01-servers.png') });
     console.log('  -> WooCommerce verified as Connected. Saved 01-servers.png');
 
+    // Step 2.5: Admin tests Server lifecycle via UI with write-only credentials
+    const testServerName = `PW Test ${Date.now()}`;
+    const testServerSlug = `pw-${Date.now()}`;
+    console.log('[2.5/7] Admin testing Server lifecycle (Add, Edit, Disable, Remove) via UI...');
+    await page.click('button:has-text("Add Upstream Server")');
+    await page.fill('#srv-name', testServerName);
+    await page.fill('#srv-slug', testServerSlug);
+    await page.selectOption('#srv-auth', 'bearer');
+    await page.fill('#srv-url', 'http://utils-mcp.conduit-system.svc.cluster.local:3300/mcp');
+    await page.fill('#srv-credential', 'super-secret-write-only-credential');
+    await page.click('button[type="submit"]:has-text("Save Upstream Server")');
+
+    // Wait for the modal to close and the row to render in DataTable
+    await page.locator('div[role="dialog"]').waitFor({ state: 'detached', timeout: 10000 });
+    const srvRow = page.locator(`tr:has-text("${testServerName}")`);
+    await srvRow.waitFor({ state: 'visible', timeout: 10000 });
+    console.log('  -> Server registered successfully via UI.');
+
+    // Edit server and verify write-only credential is NOT pre-filled (write-only security proof)
+    await srvRow.locator('button:has-text("Edit")').click();
+    await page.waitForSelector('#srv-credential', { timeout: 5000 });
+    const credVal = await page.inputValue('#srv-credential');
+    const placeholder = await page.getAttribute('#srv-credential', 'placeholder');
+    if (credVal !== '') {
+      throw new Error('Security Violation: Credential input must be blank on edit (write-only)');
+    }
+    if (!placeholder || !placeholder.includes('leave blank to keep current')) {
+      throw new Error('Security Violation: Expected write-only placeholder on credential input');
+    }
+    await page.click('button:has-text("Cancel")');
+    await page.locator('div[role="dialog"]').waitFor({ state: 'detached', timeout: 5000 });
+    console.log('  -> Server edit dialog verified write-only credential safety.');
+
+    // Disable and re-enable server via UI
+    await srvRow.locator('button:has-text("Disable")').click();
+    await page.waitForSelector(`tr:has-text("${testServerName}") button:has-text("Enable")`, { timeout: 10000 });
+    await srvRow.locator('button:has-text("Enable")').click();
+    await page.waitForSelector(`tr:has-text("${testServerName}") button:has-text("Disable")`, { timeout: 10000 });
+    console.log('  -> Server disable and enable toggles verified.');
+
+    // Remove server via UI with typed keyword confirmation
+    await srvRow.locator('button:has-text("Delete")').click();
+    await page.waitForSelector('#typed-confirmation-input', { timeout: 5000 });
+    await page.fill('#typed-confirmation-input', testServerName);
+    await page.click('button:has-text("Permanently Delete Server")');
+    await page.locator('div[role="dialog"]').waitFor({ state: 'detached', timeout: 10000 });
+    await srvRow.waitFor({ state: 'detached', timeout: 10000 });
+    console.log('  -> Server deleted cleanly with typed confirmation dialog.');
+
     // Step 3: Admin invites a member
     console.log('[3/7] Admin inviting new member...');
     await page.click('text=Team');
@@ -106,9 +159,10 @@ async function runUiSmoke() {
     await page.fill('#inv-email', memberEmail);
     await page.click('button:has-text("Create Invitation Link")');
 
-    // Wait for the invitation link input
-    await page.waitForSelector('input[readonly]', { timeout: 10000 });
-    const inviteUrl = await page.inputValue('input[readonly]');
+    // Wait for the invitation link display (supports both input and pre code)
+    const inviteLocator = page.locator('input[readonly], pre code').first();
+    await inviteLocator.waitFor({ timeout: 10000 });
+    const inviteUrl = (await inviteLocator.inputValue().catch(() => '')) || (await inviteLocator.innerText());
     if (!inviteUrl || !inviteUrl.includes('token=')) {
       throw new Error(`Failed to retrieve invite URL from modal: got ${inviteUrl}`);
     }
@@ -188,15 +242,8 @@ async function runUiSmoke() {
     // Wait for async MongoAuditSink flush
     await new Promise((r) => setTimeout(r, 2000));
 
-    // Verify Audit log shows the tool call
-    console.log('[7/7] Verifying Audit log and testing API Key revocation...');
-    await page.click('text=Audit');
-    await page.waitForURL('**/audit');
-    await page.waitForSelector('text=woo__list_products', { timeout: 10000 });
-    await page.screenshot({ path: path.join(screenshotDir, '04-audit.png') });
-    console.log('  -> Audit log verified with tool call. Saved 04-audit.png');
-
-    // Revoke the API key
+    // Revoke the API key while logged in as member
+    console.log('[7/7] Testing Member API Key revocation and verifying Audit log as Admin...');
     await page.click('text=API Keys');
     await page.waitForURL('**/keys');
     await page.click('button:has-text("Revoke")');
@@ -214,6 +261,21 @@ async function runUiSmoke() {
       throw new Error(`Expected 401 for revoked key, got status ${revokedRes.status}`);
     }
     console.log('  -> Revoked key successfully rejected with HTTP 401.');
+
+    // Logout member and log back in as Admin to verify the Audit log (Admin-only RBAC)
+    console.log('  -> Re-authenticating as Admin to verify tool call in Audit Log...');
+    await page.click('button[aria-label="Log out of Conduit"]');
+    await page.waitForURL('**/login', { timeout: 10000 });
+    await page.fill('#login-email', adminEmail);
+    await page.fill('#login-password', adminPassword);
+    await page.click('button[type="submit"]');
+    await page.waitForURL(/.*(servers|keys)/, { timeout: 15000 });
+
+    await page.click('text=Audit Log');
+    await page.waitForURL('**/audit');
+    await page.waitForSelector('text=woo__list_products', { timeout: 10000 });
+    await page.screenshot({ path: path.join(screenshotDir, '04-audit.png') });
+    console.log('  -> Audit log verified with member tool call. Saved 04-audit.png');
 
     // Assert zero CSP violations
     if (cspViolations.length > 0) {
@@ -234,6 +296,7 @@ async function runUiSmoke() {
             db.sessions.deleteMany({ userId: user._id.toString() });
             db.invites.deleteMany({ email: '${memberEmail}' });
             db.users.deleteOne({ _id: user._id });
+            db.mcp_servers.deleteMany({ slug: /^pw-/ });
           }
         "`
       );

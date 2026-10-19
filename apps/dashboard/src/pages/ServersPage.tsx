@@ -127,7 +127,7 @@ export const ServersPage: React.FC = () => {
   // Mutations
   const toggleServerMutation = useMutation({
     mutationFn: async ({ id, enable }: { id: string; enable: boolean }) => {
-      return apiClient.post(`/api/servers/${id}/${enable ? 'enable' : 'disable'}`);
+      return apiClient.patch(`/api/servers/${id}`, { enabled: enable });
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['servers'] });
@@ -200,10 +200,11 @@ export const ServersPage: React.FC = () => {
     e.preventDefault();
     try {
       if (editServer) {
-        await apiClient.put(`/api/servers/${editServer.id}`, {
+        await apiClient.patch(`/api/servers/${editServer.id}`, {
+          displayName: formName,
           name: formName,
           url: formUrl,
-          credential: formCredential ? formCredential : undefined,
+          auth: formCredential ? { type: formAuthType, credential: formCredential } : undefined,
         });
         addToast('Server updated successfully', 'success');
         setEditServer(null);

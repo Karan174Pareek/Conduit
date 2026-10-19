@@ -53,6 +53,15 @@ Detailed specifications and architectural guides live in [`docs/`](docs/):
 
 ---
 
+### 1.1 Architectural Rationale: WooCommerce REST API vs. WP-CLI
+Conduit interfaces with the WooCommerce store via its authenticated REST API (`woo-mcp` adapter) rather than invoking `wp-cli` command-line binaries or executing shell commands inside the WordPress container:
+- **Zero Pod-Exec RBAC**: The gateway and `woo-mcp` require zero Kubernetes `pods/exec` permissions. Workloads run with `automountServiceAccountToken: false` and strict network policies.
+- **Hook & Event Preservation**: The WooCommerce REST API triggers the full WordPress lifecycle (order stock reductions, webhooks, customer transactional emails, tax calculations), which direct CLI or SQL manipulation bypasses.
+- **Microservice Decoupling & Portability**: `woo-mcp` is an independent, stateless microservice. The same architecture operates identically whether WooCommerce runs in-cluster or on external managed hosting.
+- **Concurrency & Failure Isolation**: REST calls are multiplexed across Apache worker processes with standard keepalive, timeouts, and circuit-breaker bulkheads, avoiding heavy PHP process fork storms under concurrent agent queries.
+
+---
+
 ## 2. Environment Setup & Prerequisites
 
 ### 2.1 Host Requirements

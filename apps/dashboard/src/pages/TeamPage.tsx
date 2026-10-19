@@ -97,9 +97,11 @@ export const TeamPage: React.FC = () => {
         role: inviteRole,
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['invites'] });
-      setCreatedInviteUrl(data.inviteUrl);
+      const token = data.token || data.invite?.token || '';
+      const url = data.inviteUrl || `${window.location.origin}/accept-invite?token=${token}`;
+      setCreatedInviteUrl(url);
       addToast('Invitation link generated', 'success');
     },
     onError: (err: any) => {
