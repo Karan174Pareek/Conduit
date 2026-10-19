@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
+import { FormInput } from '../components/ui/FormInput';
+import { EyeIcon, EyeOffIcon, AlertTriangleIcon } from '../components/ui/Icons';
 
 export const LoginPage: React.FC = () => {
   const { login, user } = useAuth();
@@ -11,11 +12,11 @@ export const LoginPage: React.FC = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // If already logged in, redirect
-  React.useEffect(() => {
+  useEffect(() => {
     if (user) {
       const from = (location.state as any)?.from?.pathname || '/servers';
       navigate(from, { replace: true });
@@ -31,33 +32,42 @@ export const LoginPage: React.FC = () => {
       await login(email, password);
       const from = (location.state as any)?.from?.pathname || '/servers';
       navigate(from, { replace: true });
-    } catch (err: any) {
-      setError(err?.message || 'Login failed. Please verify your credentials.');
+    } catch {
+      // Security: Do not leak whether an email exists or not
+      setError('Invalid email or password. Please check your credentials.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100">
+    <main className="min-h-screen bg-canvas flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 text-txt-primary">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="w-12 h-12 rounded-xl bg-cyan-600 mx-auto flex items-center justify-center font-bold text-2xl text-white shadow-lg mb-4">
+        <div className="w-12 h-12 rounded-xl bg-brand mx-auto flex items-center justify-center font-bold text-2xl text-brand-text shadow-card mb-4">
           C
         </div>
-        <h2 className="text-3xl font-extrabold tracking-tight text-white">Sign in to Conduit</h2>
-        <p className="mt-2 text-sm text-slate-400">Enterprise MCP Gateway Management</p>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-txt-primary">
+          Sign in to Conduit
+        </h1>
+        <p className="mt-2 text-sm text-txt-secondary">
+          Team MCP Gateway & Tool Access Control Plane
+        </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-900 py-8 px-4 shadow-xl border border-slate-800 sm:rounded-lg sm:px-10">
+        <div className="bg-card py-8 px-5 sm:px-10 shadow-card border border-border rounded-xl">
           {error && (
-            <div className="mb-6 p-4 rounded-md bg-rose-950/50 border border-rose-800 text-rose-200 text-sm flex items-start space-x-2">
+            <div
+              role="alert"
+              className="mb-6 p-4 rounded-lg bg-status-error-bg border border-status-error-border text-status-error-text text-sm flex items-start gap-3"
+            >
+              <AlertTriangleIcon className="w-5 h-5 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            <Input
+          <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+            <FormInput
               id="login-email"
               label="Email address"
               type="email"
@@ -65,27 +75,38 @@ export const LoginPage: React.FC = () => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder="admin@conduit.localhost"
             />
 
-            <Input
+            <FormInput
               id="login-password"
               label="Password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              rightAction={
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-xs text-txt-secondary hover:text-txt-primary flex items-center gap-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand rounded p-0.5"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
+                  <span>{showPassword ? 'Hide' : 'Show'}</span>
+                </button>
+              }
             />
 
-            <div>
-              <Button type="submit" fullWidth isLoading={loading}>
+            <div className="pt-2">
+              <Button type="submit" variant="primary" fullWidth loading={loading}>
                 Sign In
               </Button>
             </div>
           </form>
         </div>
       </div>
-    </div>
+    </main>
   );
 };

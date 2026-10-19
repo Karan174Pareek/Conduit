@@ -1,9 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient, getCsrfToken } from '../api/client';
-import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { StatusBadge } from '../components/ui/StatusBadge';
 import { useToast } from '../components/ui/Toast';
+import {
+  ChatIcon,
+  PlusIcon,
+  StopIcon,
+  SendIcon,
+  WrenchIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  AlertTriangleIcon,
+  XCircleIcon,
+  ArrowDownIcon,
+  TrashIcon,
+  RefreshCwIcon,
+} from '../components/ui/Icons';
 
 interface ConversationSummary {
   id: string;
@@ -21,7 +35,9 @@ interface ToolCallRecord {
   ok?: boolean;
   durationMs?: number;
   summary?: string;
-  status?: 'running' | 'success' | 'error';
+  gatewayCode?: string;
+  status?: 'running' | 'success' | 'error' | 'pending_approval';
+  requiresApproval?: boolean;
 }
 
 interface MessageItem {
@@ -30,6 +46,7 @@ interface MessageItem {
   content: string;
   toolCalls?: ToolCallRecord[];
   createdAt?: string;
+  error?: string;
 }
 
 interface ConversationDetail {
@@ -52,9 +69,12 @@ export const ChatPage: React.FC = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [lastUserPrompt, setLastUserPrompt] = useState<string>('');
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollActiveRef = useRef(true);
 
   // 1. Fetch conversations list
   const { data: conversations = [], isLoading: isLoadingConvs } = useQuery<ConversationSummary[]>({
@@ -79,15 +99,38 @@ export const ChatPage: React.FC = () => {
           content: m.content,
           toolCalls: m.toolCalls,
           createdAt: m.createdAt,
-        })),
+        }))
       );
     }
   }, [convDetail, isStreaming]);
 
-  // Scroll to bottom on new messages
+  // Handle user scroll detection so auto-scroll does not fight the user
+  const handleScroll = () => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isAtBottom = distanceToBottom < 60;
+    isAutoScrollActiveRef.current = isAtBottom;
+    setShowScrollBottom(!isAtBottom);
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const el = messagesContainerRef.current;
+    if (el) {
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({ top: el.scrollHeight, behavior });
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  };
+
+  // Auto-scroll when messages update, but only if user hasn't scrolled up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
-  }, [messages, isStreaming]);
+    if (isAutoScrollActiveRef.current) {
+      scrollToBottom('auto');
+    }
+  }, [messages]);
 
   // Delete conversation mutation
   const deleteConvMutation = useMutation({
@@ -111,11 +154,12 @@ export const ChatPage: React.FC = () => {
 
   const handleStartNewChat = () => {
     if (isStreaming) {
-      addToast('Turn in progress. Please stop or wait before starting a new chat.', 'info');
+      addToast('A response is currently in progress. Please stop it first.', 'info');
       return;
     }
     setActiveConvId(null);
     setMessages([]);
+    setLastUserPrompt('');
   };
 
   const handleStopGeneration = () => {
@@ -123,7 +167,7 @@ export const ChatPage: React.FC = () => {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsStreaming(false);
-      addToast('Generation stopped', 'info');
+      addToast('Response streaming halted', 'info');
     }
   };
 
@@ -133,8 +177,8 @@ export const ChatPage: React.FC = () => {
     if (!text || isStreaming) return;
 
     setInputMessage('');
+    setLastUserPrompt(text);
 
-    // Append user message to UI immediately
     const userMsg: MessageItem = {
       role: 'user',
       content: text,
@@ -150,6 +194,8 @@ export const ChatPage: React.FC = () => {
 
     setMessages((prev) => [...prev, userMsg, initialAssistantMsg]);
     setIsStreaming(true);
+    isAutoScrollActiveRef.current = true;
+    scrollToBottom('smooth');
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -177,11 +223,11 @@ export const ChatPage: React.FC = () => {
         } catch (_e) {
           void _e;
         }
-        throw new Error(errJson.message || `Chat request failed (${response.status})`);
+        throw new Error(errJson.message || `Chat request failed with status ${response.status}`);
       }
 
       if (!response.body) {
-        throw new Error('Response body is null');
+        throw new Error('Response stream body is empty');
       }
 
       const reader = response.body.getReader();
@@ -257,6 +303,7 @@ export const ChatPage: React.FC = () => {
                         ok: data.ok,
                         durationMs: data.durationMs,
                         summary: data.summary,
+                        gatewayCode: data.code || (data.ok ? 'OK' : 'TOOL_ERROR'),
                         status: data.ok ? 'success' : 'error',
                       };
                     }
@@ -266,19 +313,36 @@ export const ChatPage: React.FC = () => {
                 return next;
               });
             } else if (eventName === 'error') {
-              addToast(data.message || 'An error occurred during turn execution', 'error');
+              const errMsg = data.message || 'An error occurred during turn execution';
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last && last.role === 'assistant') {
+                  last.error = errMsg;
+                }
+                return next;
+              });
+              addToast(errMsg, 'error');
             } else if (eventName === 'done') {
-              // Finalized
               queryClient.invalidateQueries({ queryKey: ['conversations'] });
             }
           } catch (parseErr) {
-            console.error('Error parsing SSE event:', parseErr);
+            console.error('SSE JSON parse error:', parseErr);
           }
         }
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
-        addToast(err.message || 'Turn failed', 'error');
+        const errMsg = err.message || 'Connection interrupted';
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === 'assistant') {
+            last.error = errMsg;
+          }
+          return next;
+        });
+        addToast(errMsg, 'error');
       }
     } finally {
       setIsStreaming(false);
@@ -293,28 +357,71 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  const handleApproveTool = (toolId: string) => {
+    addToast('Tool approved for execution', 'success');
+    setMessages((prev) => {
+      return prev.map((m) => {
+        if (!m.toolCalls) return m;
+        return {
+          ...m,
+          toolCalls: m.toolCalls.map((tc) =>
+            tc.id === toolId ? { ...tc, status: 'running', requiresApproval: false } : tc
+          ),
+        };
+      });
+    });
+  };
+
+  const handleDenyTool = (toolId: string) => {
+    addToast('Tool execution denied by user', 'info');
+    setMessages((prev) => {
+      return prev.map((m) => {
+        if (!m.toolCalls) return m;
+        return {
+          ...m,
+          toolCalls: m.toolCalls.map((tc) =>
+            tc.id === toolId
+              ? {
+                  ...tc,
+                  status: 'error',
+                  ok: false,
+                  requiresApproval: false,
+                  summary: 'Action explicitly denied by user',
+                }
+              : tc
+          ),
+        };
+      });
+    });
+  };
+
   return (
-    <div className="flex h-[calc(100vh-8rem)] rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-2xl">
-      {/* Left Sidebar: Conversations List */}
-      <aside className="w-80 border-r border-slate-800 flex flex-col bg-slate-950/60">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="font-semibold text-sm text-slate-200">Conversations</span>
-            <Badge variant="default" size="sm">
-              {conversations.length}
-            </Badge>
+    <div className="flex flex-col md:flex-row h-[calc(100vh-7.5rem)] rounded-xl border border-border-default bg-surface-panel overflow-hidden shadow-sm">
+      {/* Sidebar: Conversations List */}
+      <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-border-default flex flex-col bg-surface-subtle max-h-48 md:max-h-full">
+        <div className="p-3.5 border-b border-border-default flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ChatIcon className="w-4 h-4 text-brand" />
+            <span className="text-xs font-bold uppercase tracking-wider text-text-primary">
+              Conversations
+            </span>
           </div>
-          <Button variant="outline" size="sm" onClick={handleStartNewChat}>
-            + New
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleStartNewChat}
+            leftIcon={<PlusIcon className="w-3.5 h-3.5" />}
+          >
+            New Chat
           </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {isLoadingConvs ? (
-            <div className="p-4 text-center text-xs text-slate-500">Loading chats...</div>
+            <div className="p-4 text-center text-xs text-text-muted">Loading chats...</div>
           ) : conversations.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500">
-              No conversations yet. Send a message to start!
+            <div className="p-6 text-center text-xs text-text-muted">
+              No conversations yet. Send a prompt to begin!
             </div>
           ) : (
             conversations.map((c) => {
@@ -327,15 +434,15 @@ export const ChatPage: React.FC = () => {
                       setActiveConvId(c.id);
                     }
                   }}
-                  className={`group flex items-center justify-between p-3 rounded-lg text-sm cursor-pointer transition-colors ${
+                  className={`group flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition-colors ${
                     isActive
-                      ? 'bg-slate-800 text-white font-medium border border-slate-700/60'
-                      : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
+                      ? 'bg-brand/10 text-brand font-semibold border border-brand/20'
+                      : 'text-text-secondary hover:bg-surface-subtle hover:text-text-primary'
                   }`}
                 >
                   <div className="truncate flex-1 pr-2">
-                    <div className="truncate text-xs font-medium text-slate-200">{c.title}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
+                    <div className="truncate font-medium">{c.title}</div>
+                    <div className="text-[10px] text-text-muted mt-0.5">
                       {new Date(c.updatedAt).toLocaleDateString([], {
                         month: 'short',
                         day: 'numeric',
@@ -346,16 +453,17 @@ export const ChatPage: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    title="Delete conversation"
+                    title={`Delete conversation: ${c.title}`}
+                    aria-label={`Delete conversation: ${c.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm('Delete this conversation?')) {
+                      if (window.confirm(`Delete conversation "${c.title}"?`)) {
                         deleteConvMutation.mutate(c.id);
                       }
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 text-xs px-1.5 py-0.5 rounded transition"
+                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-danger p-1 rounded transition focus:opacity-100 min-h-[32px] min-w-[32px] flex items-center justify-center"
                   >
-                    ×
+                    <TrashIcon className="w-3.5 h-3.5" />
                   </button>
                 </div>
               );
@@ -364,45 +472,54 @@ export const ChatPage: React.FC = () => {
         </div>
       </aside>
 
-      {/* Right Main Chat Area */}
-      <section className="flex-1 flex flex-col bg-slate-900/30">
+      {/* Main Chat Workspace */}
+      <section className="flex-1 flex flex-col bg-surface-panel relative min-h-0">
         {/* Chat Header */}
-        <header className="h-14 border-b border-slate-800 px-6 flex items-center justify-between bg-slate-900/50">
-          <div className="flex items-center space-x-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 shadow-sm" />
-            <h2 className="text-sm font-semibold text-slate-200">
+        <header className="h-14 border-b border-border-default px-6 flex items-center justify-between bg-surface-panel flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-brand animate-pulse" />
+            <h1 className="text-sm font-bold text-text-primary">
               {activeConvId
-                ? conversations.find((c) => c.id === activeConvId)?.title || 'Active Conversation'
+                ? conversations.find((c) => c.id === activeConvId)?.title || 'Conduit Chat'
                 : 'New Conversation'}
-            </h2>
+            </h1>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             {isStreaming && (
-              <Badge variant="warning" size="sm">
+              <span
+                role="status"
+                aria-live="polite"
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold bg-surface-warning text-text-warning border border-border-warning"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-text-warning animate-ping" />
                 Streaming Turn...
-              </Badge>
+              </span>
             )}
-            <Badge variant="default" size="sm">
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-surface-subtle border border-border-default text-text-muted">
               Gemini 2.5 Flash
-            </Badge>
+            </span>
           </div>
         </header>
 
         {/* Messages Stream */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6"
+        >
           {isLoadingDetail && activeConvId ? (
-            <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+            <div className="h-full flex items-center justify-center text-text-muted text-sm">
               Loading conversation history...
             </div>
           ) : messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-xl">
+            <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto space-y-4 p-4">
+              <div className="w-12 h-12 rounded-2xl bg-brand/10 border border-brand/30 flex items-center justify-center text-brand font-bold text-xl">
                 C
               </div>
               <div>
-                <h3 className="text-base font-semibold text-slate-200">Conduit AI Assistant</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Interact with upstream MCP tools across your connected services seamlessly.
+                <h2 className="text-base font-bold text-text-primary">Conduit AI Assistant</h2>
+                <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
+                  Execute authorized upstream tools across connected servers under team policy rules.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-2 w-full pt-2">
@@ -415,7 +532,7 @@ export const ChatPage: React.FC = () => {
                     key={idx}
                     type="button"
                     onClick={() => handleSendMessage(promptText)}
-                    className="p-3 text-left text-xs rounded-lg border border-slate-800 bg-slate-950/40 hover:bg-slate-800/60 text-slate-300 hover:text-white transition"
+                    className="p-3 text-left text-xs rounded-lg border border-border-default bg-surface-subtle hover:bg-brand/5 hover:border-brand/40 text-text-secondary hover:text-text-primary transition min-h-[44px]"
                   >
                     "{promptText}"
                   </button>
@@ -427,81 +544,137 @@ export const ChatPage: React.FC = () => {
               const isUser = m.role === 'user';
               return (
                 <div key={idx} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-                  <div className="flex items-center space-x-2 mb-1 px-1">
-                    <span className="text-[11px] font-semibold text-slate-400">
+                  <div className="flex items-center gap-1.5 mb-1 px-1">
+                    <span className="text-[11px] font-bold text-text-muted">
                       {isUser ? 'You' : 'Conduit Assistant'}
                     </span>
                   </div>
 
                   <div
-                    className={`max-w-2xl rounded-xl p-4 text-sm leading-relaxed ${
+                    className={`max-w-2xl rounded-xl p-4 text-sm leading-relaxed border shadow-xs ${
                       isUser
-                        ? 'bg-cyan-950/60 border border-cyan-800/50 text-cyan-100 shadow-sm'
-                        : 'bg-slate-950/80 border border-slate-800 text-slate-200 shadow-sm'
+                        ? 'bg-brand/10 border-brand/30 text-text-primary'
+                        : 'bg-surface-subtle border-border-default text-text-primary'
                     }`}
                   >
+                    {/* Plain text content - strictly no raw HTML */}
                     <div className="whitespace-pre-wrap">{m.content}</div>
+
+                    {/* Streaming placeholder dot */}
+                    {isStreaming && idx === messages.length - 1 && !m.content && (
+                      <span className="inline-block w-2 h-4 bg-brand animate-pulse ml-0.5" />
+                    )}
 
                     {/* Tool Calls Section */}
                     {m.toolCalls && m.toolCalls.length > 0 && (
-                      <div className="mt-4 space-y-2 border-t border-slate-800 pt-3">
-                        <div className="text-[11px] font-semibold tracking-wider uppercase text-slate-400">
-                          Executed Upstream Tools ({m.toolCalls.length})
+                      <div className="mt-4 space-y-2.5 border-t border-border-default pt-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-text-muted flex items-center gap-1.5">
+                          <WrenchIcon className="w-3.5 h-3.5" />
+                          <span>Tool Invocations ({m.toolCalls.length})</span>
                         </div>
+
                         {m.toolCalls.map((tc) => {
                           const isExpanded = !!expandedTools[tc.id];
-                          const displayName = tc.name || (tc.server && tc.tool ? `${tc.server}__${tc.tool}` : 'tool');
+                          const displayName =
+                            tc.name ||
+                            (tc.server && tc.tool ? `${tc.server}__${tc.tool}` : 'tool');
+
                           return (
                             <div
                               key={tc.id}
-                              className="rounded-lg border border-slate-800/80 bg-slate-900/60 text-xs overflow-hidden"
+                              className="rounded-lg border border-border-default bg-surface-panel text-xs overflow-hidden"
                             >
+                              {/* Tool Card Header */}
                               <div
                                 onClick={() => toggleToolExpanded(tc.id)}
-                                className="p-2.5 flex items-center justify-between cursor-pointer hover:bg-slate-800/40 transition"
+                                className="p-3 flex items-center justify-between cursor-pointer hover:bg-surface-subtle transition min-h-[44px]"
                               >
-                                <div className="flex items-center space-x-2">
-                                  <span className="font-mono font-medium text-cyan-300">{displayName}</span>
+                                <div className="flex items-center gap-2">
+                                  {isExpanded ? (
+                                    <ChevronDownIcon className="w-4 h-4 text-text-muted" />
+                                  ) : (
+                                    <ChevronRightIcon className="w-4 h-4 text-text-muted" />
+                                  )}
+                                  <span className="font-mono font-semibold text-brand">
+                                    {displayName}
+                                  </span>
                                   {tc.durationMs !== undefined && (
-                                    <span className="text-[10px] text-slate-500 font-mono">
+                                    <span className="text-[10px] text-text-muted font-mono">
                                       {tc.durationMs}ms
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center space-x-2">
+
+                                <div className="flex items-center gap-2">
                                   {tc.status === 'running' && (
-                                    <Badge variant="warning" size="sm">
-                                      running
-                                    </Badge>
+                                    <StatusBadge status="disabled" label="running" />
                                   )}
                                   {tc.status === 'success' && (
-                                    <Badge variant="success" size="sm">
-                                      ok
-                                    </Badge>
+                                    <StatusBadge status="connected" label={tc.gatewayCode || 'ok'} />
                                   )}
                                   {tc.status === 'error' && (
-                                    <Badge variant="danger" size="sm">
-                                      error
-                                    </Badge>
+                                    <StatusBadge status="unreachable" label={tc.gatewayCode || 'error'} />
                                   )}
-                                  <span className="text-slate-500">{isExpanded ? '▲' : '▼'}</span>
                                 </div>
                               </div>
 
+                              {/* Destructive Tool Confirmation Card */}
+                              {tc.requiresApproval && (
+                                <div className="p-3 border-t border-border-warning bg-surface-warning text-text-warning text-xs space-y-2">
+                                  <div className="flex items-center gap-1.5 font-bold">
+                                    <AlertTriangleIcon className="w-4 h-4" />
+                                    <span>Destructive Tool Confirmation Required</span>
+                                  </div>
+                                  <p>
+                                    This tool alters upstream state. Review arguments below before approving execution:
+                                  </p>
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <Button
+                                      size="sm"
+                                      variant="primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleApproveTool(tc.id);
+                                      }}
+                                    >
+                                      Approve Execution
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="danger"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDenyTool(tc.id);
+                                      }}
+                                    >
+                                      Deny
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Collapsible Tool Details */}
                               {isExpanded && (
-                                <div className="p-3 border-t border-slate-800/60 bg-slate-950/80 space-y-2 text-[11px] font-mono">
+                                <div className="p-3 border-t border-border-default bg-surface-subtle space-y-3 font-mono text-[11px]">
                                   {tc.args && (
                                     <div>
-                                      <div className="text-slate-500 mb-1">Arguments:</div>
-                                      <pre className="p-2 rounded bg-slate-900 text-slate-300 overflow-x-auto">
+                                      <div className="text-text-muted font-bold mb-1">Arguments:</div>
+                                      <pre
+                                        tabIndex={0}
+                                        className="p-2.5 rounded bg-surface-panel border border-border-default text-text-secondary overflow-x-auto focus:outline-none focus:ring-1 focus:ring-brand"
+                                      >
                                         {JSON.stringify(tc.args, null, 2)}
                                       </pre>
                                     </div>
                                   )}
+
                                   {tc.summary && (
                                     <div>
-                                      <div className="text-slate-500 mb-1">Output Summary:</div>
-                                      <pre className="p-2 rounded bg-slate-900 text-slate-300 overflow-x-auto">
+                                      <div className="text-text-muted font-bold mb-1">Execution Summary:</div>
+                                      <pre
+                                        tabIndex={0}
+                                        className="p-2.5 rounded bg-surface-panel border border-border-default text-text-secondary overflow-x-auto focus:outline-none focus:ring-1 focus:ring-brand whitespace-pre-wrap"
+                                      >
                                         {tc.summary}
                                       </pre>
                                     </div>
@@ -513,18 +686,53 @@ export const ChatPage: React.FC = () => {
                         })}
                       </div>
                     )}
+
+                    {/* Error Banner with Retry */}
+                    {m.error && (
+                      <div className="mt-3 p-3 rounded-lg bg-surface-danger border border-border-danger text-text-danger text-xs space-y-2">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <XCircleIcon className="w-4 h-4 flex-shrink-0" />
+                          <span>Turn Execution Failure: {m.error}</span>
+                        </div>
+                        {lastUserPrompt && (
+                          <div className="pt-1">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleSendMessage(lastUserPrompt)}
+                              leftIcon={<RefreshCwIcon className="w-3.5 h-3.5" />}
+                            >
+                              Retry Last Prompt
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })
           )}
-          <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Composer */}
-        <footer className="border-t border-slate-800 p-4 bg-slate-950/60">
+        {/* Floating Scroll to Bottom Button */}
+        {showScrollBottom && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom('smooth')}
+            aria-label="Scroll to newest messages"
+            className="absolute bottom-24 right-6 p-2 rounded-full bg-surface-panel border border-border-default shadow-md text-text-primary hover:text-brand hover:border-brand transition min-h-[44px] min-w-[44px] flex items-center justify-center z-10"
+          >
+            <ArrowDownIcon className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Sticky Mobile-Friendly Input Composer */}
+        <footer className="border-t border-border-default p-4 bg-surface-subtle flex-shrink-0">
           <div className="relative">
             <textarea
+              id="chat-input"
+              aria-label="Conduit Assistant Message Input"
               rows={3}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
@@ -533,13 +741,18 @@ export const ChatPage: React.FC = () => {
               placeholder={
                 isStreaming
                   ? 'Conduit assistant is responding...'
-                  : 'Ask Conduit Assistant... (Enter to send, Shift+Enter for new line)'
+                  : 'Ask Conduit Assistant... (Enter to send, Shift+Enter for newline)'
               }
-              className="w-full resize-none rounded-xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-50"
+              className="w-full resize-none rounded-xl border border-border-default bg-surface-panel px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-50"
             />
-            <div className="absolute right-3 bottom-3 flex items-center space-x-2">
+            <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {isStreaming ? (
-                <Button variant="danger" size="sm" onClick={handleStopGeneration}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleStopGeneration}
+                  leftIcon={<StopIcon className="w-3.5 h-3.5" />}
+                >
                   Stop
                 </Button>
               ) : (
@@ -548,15 +761,16 @@ export const ChatPage: React.FC = () => {
                   size="sm"
                   disabled={!inputMessage.trim()}
                   onClick={() => handleSendMessage()}
+                  leftIcon={<SendIcon className="w-3.5 h-3.5" />}
                 >
                   Send
                 </Button>
               )}
             </div>
           </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500 px-1">
+          <div className="mt-2 flex flex-col sm:flex-row items-center justify-between text-[11px] text-text-muted px-1 gap-1">
             <span>Tools are governed by your team role and upstream authorization policies.</span>
-            <span>Conduit Team Gateway</span>
+            <span className="font-mono">Conduit Team Gateway</span>
           </div>
         </footer>
       </section>

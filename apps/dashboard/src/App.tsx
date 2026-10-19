@@ -15,6 +15,7 @@ import { AuditPage } from './pages/AuditPage';
 import { TeamPage } from './pages/TeamPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { ChatPage } from './pages/ChatPage';
+import { PoliciesPage } from './pages/PoliciesPage';
 import { ForbiddenPage } from './pages/ForbiddenPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
@@ -33,7 +34,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
+      <div className="min-h-screen bg-surface-panel flex items-center justify-center text-text-muted text-sm">
         Authenticating session...
       </div>
     );
@@ -56,7 +57,7 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
+      <div className="min-h-screen bg-surface-panel flex items-center justify-center text-text-muted text-sm">
         Authenticating session...
       </div>
     );
@@ -109,6 +110,14 @@ export const App: React.FC = () => {
                     element={
                       <AdminRoute>
                         <TeamPage />
+                      </AdminRoute>
+                    }
+                  />
+                  <Route
+                    path="policies"
+                    element={
+                      <AdminRoute>
+                        <PoliciesPage />
                       </AdminRoute>
                     }
                   />
