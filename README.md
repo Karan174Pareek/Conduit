@@ -130,11 +130,12 @@ make deploy-local
 In accordance with enterprise security policy, fresh cluster deployments flag the bootstrap admin with `mustChangePassword: true`. All platform API calls are blocked with HTTP 403 `password_change_required` until updated.
 
 1. Retrieve the bootstrap admin credentials:
-   ```bash
-   # Email: admin@conduit.localhost
-   kubectl get secret conduit-secrets -n conduit-system \
-     -o jsonpath="{.data.BOOTSTRAP_ADMIN_PASSWORD}" | base64 -d | cut -c1-4 && echo "***"
-   ```
+   - **Email**: `admin@conduit.localhost`
+   - **Password**: Read `BOOTSTRAP_ADMIN_PASSWORD` from `.env`, or decode from Kubernetes Secret:
+     ```bash
+     kubectl get secret conduit-secrets -n conduit-system \
+       -o jsonpath="{.data.BOOTSTRAP_ADMIN_PASSWORD}" | base64 -d && echo
+     ```
 2. Navigate to **[http://dashboard.localhost](http://dashboard.localhost)**.
 3. Sign in with the retrieved password.
 4. You will be redirected to `/change-password`. Set a new compliant password (minimum 12 characters, checked against common denylists).
@@ -142,7 +143,7 @@ In accordance with enterprise security policy, fresh cluster deployments flag th
 
 ---
 
-## 5. Placing a Storefront Order
+## 5. Placing a Storefront Order & WordPress Admin Access
 
 WooCommerce runs natively inside the cluster (`shop.localhost`):
 1. Open **[http://shop.localhost](http://shop.localhost)** in your browser.
@@ -150,6 +151,15 @@ WooCommerce runs natively inside the cluster (`shop.localhost`):
 3. Proceed to **Checkout** (`http://shop.localhost/checkout/`).
 4. Fill in billing details, select **Cash on delivery (COD)**, and click **Place order**.
 5. The order is immediately processed and visible in WordPress Admin (`http://shop.localhost/wp-admin`) and queryable via the MCP Gateway.
+
+**WordPress Admin Credentials**:
+- **Login URL**: `http://shop.localhost/wp-login.php`
+- **Username**: `admin`
+- **Password**: Read `WP_ADMIN_PASSWORD` from `.env`, or decode from Kubernetes Secret:
+  ```bash
+  kubectl get secret store-secrets -n store-default \
+    -o jsonpath="{.data.WP_ADMIN_PASSWORD}" | base64 -d && echo
+  ```
 
 ---
 
