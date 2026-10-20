@@ -45,6 +45,7 @@ const ROUTE_CLASSIFICATIONS: Record<string, RouteClassification> = {
   'PATCH /api/users/:id': 'session+admin',
   'POST /api/servers': 'session+admin',
   'PATCH /api/servers/:id': 'session+admin',
+  'PUT /api/servers/:id': 'session+admin',
   'DELETE /api/servers/:id': 'session+admin',
   'POST /api/servers/test': 'session+admin',
   'POST /api/servers/:id/tools/approve': 'session+admin',
@@ -95,7 +96,7 @@ describe('Route Classification, Authentication Matrix & Actor Email Security', (
     ADMIN_PASSWORD: '',
     ORG_NAME: 'Test Org',
     GEMINI_API_KEY: '',
-    GEMINI_MODEL: 'gemini-2.5-flash',
+    GEMINI_MODEL: 'gemini-3.8-flash',
   };
 
   beforeAll(async () => {

@@ -3,17 +3,27 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import { useToast } from '../components/ui/Toast';
 import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
-import { Table, Column } from '../components/ui/Table';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { PageHeader } from '../components/ui/PageHeader';
+import { DataTable, Column } from '../components/ui/DataTable';
 import { Modal } from '../components/ui/Modal';
-import { Input } from '../components/ui/Input';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { FormInput, FormSelect } from '../components/ui/FormInput';
+import { EmptyState } from '../components/ui/EmptyState';
+import { CodeBlock } from '../components/ui/CodeBlock';
+import {
+  UsersIcon,
+  UserPlusIcon,
+  MailIcon,
+  TrashIcon,
+} from '../components/ui/Icons';
 
 interface UserItem {
   id: string;
   email: string;
-  displayName?: string;
   role: 'admin' | 'member';
   disabled: boolean;
+  displayName?: string;
   createdAt: string;
 }
 
@@ -29,34 +39,34 @@ export const TeamPage: React.FC = () => {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
 
-  // Invite modal
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
   const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null);
+  const [revokeInviteTarget, setRevokeInviteTarget] = useState<InviteItem | null>(null);
 
   // 1. Fetch Users
-  const { data: usersData, isLoading: loadingUsers } = useQuery({
+  const { data: usersData, isLoading: loadingUsers } = useQuery<UserItem[]>({
     queryKey: ['users'],
     queryFn: async () => {
       const res = await apiClient.get<{ users: UserItem[] }>('/api/users');
-      return res.users;
+      return res.users || [];
     },
   });
 
   // 2. Fetch Invites
-  const { data: invitesData, isLoading: loadingInvites } = useQuery({
+  const { data: invitesData, isLoading: loadingInvites } = useQuery<InviteItem[]>({
     queryKey: ['invites'],
     queryFn: async () => {
       const res = await apiClient.get<{ invites: InviteItem[] }>('/api/invites');
-      return res.invites;
+      return res.invites || [];
     },
   });
 
   // Mutations
   const updateRoleMutation = useMutation({
     mutationFn: async ({ id, role }: { id: string; role: 'admin' | 'member' }) => {
-      return apiClient.patch(`/api/users/${id}`, { role });
+      return apiClient.put(`/api/users/${id}/role`, { role });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -69,7 +79,7 @@ export const TeamPage: React.FC = () => {
 
   const toggleUserMutation = useMutation({
     mutationFn: async ({ id, disable }: { id: string; disable: boolean }) => {
-      return apiClient.patch(`/api/users/${id}`, { status: disable ? 'disabled' : 'active' });
+      return apiClient.post(`/api/users/${id}/${disable ? 'disable' : 'enable'}`);
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -82,16 +92,17 @@ export const TeamPage: React.FC = () => {
 
   const createInviteMutation = useMutation({
     mutationFn: async () => {
-      return apiClient.post<{ invite: { id: string; email: string; token: string; inviteUrl?: string } }>('/api/invites', {
-        email: inviteEmail.trim(),
+      return apiClient.post<{ inviteUrl: string }>('/api/invites', {
+        email: inviteEmail,
         role: inviteRole,
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['invites'] });
-      const inv = (data as any).invite || data; const fullUrl = inv.inviteUrl || `${window.location.origin}/accept-invite?token=${inv.token}`;
-      setCreatedInviteUrl(fullUrl);
-      addToast('Invitation created successfully', 'success');
+      const token = data.token || data.invite?.token || '';
+      const url = data.inviteUrl || `${window.location.origin}/accept-invite?token=${token}`;
+      setCreatedInviteUrl(url);
+      addToast('Invitation link generated', 'success');
     },
     onError: (err: any) => {
       addToast(err?.message || 'Failed to create invite', 'error');
@@ -104,35 +115,32 @@ export const TeamPage: React.FC = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invites'] });
-      addToast('Invite revoked', 'success');
+      addToast('Invite revoked successfully', 'success');
+      setRevokeInviteTarget(null);
     },
     onError: (err: any) => {
       addToast(err?.message || 'Failed to revoke invite', 'error');
     },
   });
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    addToast('Copied to clipboard!', 'info');
-  };
-
   const userColumns: Column<UserItem>[] = [
     {
       key: 'email',
-      header: 'User',
+      header: 'Team Member',
       render: (u: UserItem) => (
         <div>
-          <div className="font-medium text-white">{u.email}</div>
-          {u.displayName && <div className="text-xs text-slate-400">{u.displayName}</div>}
+          <div className="font-semibold text-text-primary">{u.email}</div>
+          {u.displayName && <div className="text-xs text-text-muted mt-0.5">{u.displayName}</div>}
         </div>
       ),
     },
     {
       key: 'role',
-      header: 'Role',
+      header: 'Access Role',
       render: (u: UserItem) => (
         <select
-          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+          aria-label={`Access role for ${u.email}`}
+          className="bg-surface-panel border border-border-default rounded-md px-2.5 py-1 text-xs text-text-primary font-medium focus:outline-none focus:ring-2 focus:ring-brand min-h-[36px]"
           value={u.role}
           onChange={(e) => updateRoleMutation.mutate({ id: u.id, role: e.target.value as any })}
           disabled={updateRoleMutation.isPending}
@@ -146,16 +154,17 @@ export const TeamPage: React.FC = () => {
       key: 'disabled',
       header: 'Status',
       render: (u: UserItem) => (
-        <Badge variant={u.disabled ? 'danger' : 'success'}>
-          {u.disabled ? 'Disabled' : 'Active'}
-        </Badge>
+        <StatusBadge
+          status={u.disabled ? 'disabled' : 'connected'}
+          label={u.disabled ? 'Disabled' : 'Active'}
+        />
       ),
     },
     {
       key: 'createdAt',
-      header: 'Joined',
+      header: 'Member Since',
       render: (u: UserItem) => (
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-text-muted">
           {new Date(u.createdAt).toLocaleDateString()}
         </span>
       ),
@@ -166,12 +175,12 @@ export const TeamPage: React.FC = () => {
       align: 'right',
       render: (u: UserItem) => (
         <Button
-          variant={u.disabled ? 'outline' : 'secondary'}
+          variant={u.disabled ? 'primary' : 'secondary'}
           size="sm"
           onClick={() => toggleUserMutation.mutate({ id: u.id, disable: !u.disabled })}
           isLoading={toggleUserMutation.isPending}
         >
-          {u.disabled ? 'Enable' : 'Disable'}
+          {u.disabled ? 'Enable Account' : 'Disable Account'}
         </Button>
       ),
     },
@@ -180,23 +189,31 @@ export const TeamPage: React.FC = () => {
   const inviteColumns: Column<InviteItem>[] = [
     {
       key: 'email',
-      header: 'Invited Email',
-      render: (inv: InviteItem) => <span className="font-mono text-xs text-white">{inv.email}</span>,
+      header: 'Invited Recipient',
+      render: (inv: InviteItem) => (
+        <span className="font-mono text-xs font-semibold text-text-primary">{inv.email}</span>
+      ),
     },
     {
       key: 'role',
-      header: 'Role',
+      header: 'Assigned Role',
       render: (inv: InviteItem) => (
-        <Badge variant={inv.role === 'admin' ? 'info' : 'neutral'} size="sm">
+        <span
+          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider ${
+            inv.role === 'admin'
+              ? 'bg-brand/10 text-brand border border-brand/20'
+              : 'bg-surface-subtle text-text-secondary border border-border-default'
+          }`}
+        >
           {inv.role}
-        </Badge>
+        </span>
       ),
     },
     {
       key: 'expiresAt',
-      header: 'Expires',
+      header: 'Link Expiry',
       render: (inv: InviteItem) => (
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-text-muted">
           {new Date(inv.expiresAt).toLocaleDateString()}
         </span>
       ),
@@ -209,8 +226,9 @@ export const TeamPage: React.FC = () => {
         <Button
           variant="danger"
           size="sm"
-          onClick={() => revokeInviteMutation.mutate(inv.id)}
+          onClick={() => setRevokeInviteTarget(inv)}
           isLoading={revokeInviteMutation.isPending}
+          leftIcon={<TrashIcon className="w-3.5 h-3.5" />}
         >
           Revoke
         </Button>
@@ -222,49 +240,61 @@ export const TeamPage: React.FC = () => {
     <div className="space-y-10">
       {/* Users Section */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Team Management</h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Manage member access, roles, and administrative privileges.
-            </p>
-          </div>
-          <Button
-            onClick={() => {
-              setInviteEmail('');
-              setInviteRole('member');
-              setCreatedInviteUrl(null);
-              setShowInviteModal(true);
-            }}
-          >
-            Invite Member
-          </Button>
-        </div>
+        <PageHeader
+          title="Team Management"
+          description="Manage member access, role assignments, and organizational privileges."
+          breadcrumbs={[{ label: 'Dashboard' }, { label: 'Team' }]}
+          actions={
+            <Button
+              onClick={() => {
+                setInviteEmail('');
+                setInviteRole('member');
+                setCreatedInviteUrl(null);
+                setShowInviteModal(true);
+              }}
+              leftIcon={<UserPlusIcon className="w-4 h-4" />}
+            >
+              Invite Member
+            </Button>
+          }
+        />
 
-        <Table<UserItem>
+        <DataTable<UserItem>
           columns={userColumns}
           data={usersData || []}
-          keyExtractor={(item: UserItem) => item.id}
+          keyExtractor={(item) => item.id}
           isLoading={loadingUsers}
-          emptyMessage="No users found."
+          emptyState={
+            <EmptyState
+              icon={<UsersIcon className="w-10 h-10 text-text-muted" />}
+              title="No Team Members Found"
+              description="Invite team members to provide them access to Conduit."
+            />
+          }
         />
       </div>
 
       {/* Pending Invites Section */}
-      <div className="space-y-4 pt-6 border-t border-slate-800">
+      <div className="space-y-4 pt-6 border-t border-border-default">
         <div>
-          <h2 className="text-lg font-semibold text-white tracking-tight">Pending Invitations</h2>
-          <p className="text-sm text-slate-400">
-            Outstanding invites that have not yet been accepted.
+          <h2 className="text-lg font-bold text-text-primary tracking-tight">Pending Invitations</h2>
+          <p className="text-xs text-text-secondary mt-0.5">
+            Outstanding single-use invitation tokens awaiting acceptance.
           </p>
         </div>
 
-        <Table<InviteItem>
+        <DataTable<InviteItem>
           columns={inviteColumns}
           data={invitesData || []}
-          keyExtractor={(item: InviteItem) => item.id}
+          keyExtractor={(item) => item.id}
           isLoading={loadingInvites}
-          emptyMessage="No pending invitations."
+          emptyState={
+            <EmptyState
+              icon={<MailIcon className="w-8 h-8 text-text-muted" />}
+              title="No Pending Invitations"
+              description="All issued team invitations have either been accepted or revoked."
+            />
+          }
         />
       </div>
 
@@ -279,7 +309,7 @@ export const TeamPage: React.FC = () => {
         footer={
           createdInviteUrl ? (
             <Button
-              variant="secondary"
+              variant="primary"
               onClick={() => {
                 setShowInviteModal(false);
                 setCreatedInviteUrl(null);
@@ -292,25 +322,15 @@ export const TeamPage: React.FC = () => {
       >
         {createdInviteUrl ? (
           <div className="space-y-4">
-            <div className="p-3 bg-emerald-950/40 border border-emerald-800 rounded-lg text-emerald-200 text-xs">
-              Invitation link generated. Send this link to the user; it will only be displayed once.
+            <div className="p-3 bg-surface-success border border-border-success rounded-lg text-text-success text-xs">
+              Single-use invitation link generated. Transmit this secure link to the recipient.
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+            <div className="space-y-1.5">
+              <span className="block text-xs font-semibold text-text-secondary uppercase tracking-wider">
                 Invitation URL
-              </label>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={createdInviteUrl}
-                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 select-all"
-                />
-                <Button size="sm" onClick={() => copyToClipboard(createdInviteUrl)}>
-                  Copy
-                </Button>
-              </div>
+              </span>
+              <CodeBlock code={createdInviteUrl} language="text" />
             </div>
           </div>
         ) : (
@@ -321,30 +341,35 @@ export const TeamPage: React.FC = () => {
             }}
             className="space-y-4"
           >
-            <Input
+            <FormInput
               id="inv-email"
-              label="Email address"
+              label="Recipient Email Address"
               type="email"
               required
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="colleague@example.com"
+              helperText="An onboarding invitation link will be created for this email."
             />
 
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Role</label>
-              <select
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as any)}
-              >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
+            <FormSelect
+              id="inv-role"
+              label="Role Assignment"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value as any)}
+              options={[
+                { value: 'member', label: 'Member (Tool execution & Chat only)' },
+                { value: 'admin', label: 'Admin (Full cluster & policy control)' },
+              ]}
+              helperText="Members cannot modify servers, audit logs, or system policies."
+            />
 
-            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-800">
-              <Button type="button" variant="secondary" onClick={() => setShowInviteModal(false)}>
+            <div className="flex justify-end gap-3 pt-4 border-t border-border-default">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowInviteModal(false)}
+              >
                 Cancel
               </Button>
               <Button type="submit" isLoading={createInviteMutation.isPending}>
@@ -354,6 +379,20 @@ export const TeamPage: React.FC = () => {
           </form>
         )}
       </Modal>
+
+      {/* Revoke Invite Confirmation Dialog */}
+      {revokeInviteTarget && (
+        <ConfirmDialog
+          isOpen={!!revokeInviteTarget}
+          onClose={() => setRevokeInviteTarget(null)}
+          onConfirm={() => revokeInviteMutation.mutate(revokeInviteTarget.id)}
+          title="Revoke Invitation"
+          message={`Are you sure you want to revoke the pending invitation for ${revokeInviteTarget.email}? The invitation link will immediately become invalid.`}
+          confirmText="Revoke Invitation"
+          variant="danger"
+          isLoading={revokeInviteMutation.isPending}
+        />
+      )}
     </div>
   );
 };

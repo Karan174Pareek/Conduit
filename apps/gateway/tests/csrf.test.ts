@@ -18,7 +18,7 @@ describe('CSRF Origin Verification', () => {
     LOG_LEVEL: 'info',
     ENABLE_DEBUG_ROUTES: false,
     GEMINI_API_KEY: '',
-    GEMINI_MODEL: 'gemini-2.5-flash',
+    GEMINI_MODEL: 'gemini-3.8-flash',
   };
 
   it('allows matching origins', () => {

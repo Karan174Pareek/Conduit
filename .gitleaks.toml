@@ -5,7 +5,8 @@ useDefault = true
 regexes = [
   'mcpgw_a1b2c3d4_SUPER_SECRET_TOKEN_DO_NOT_LEAK',
   'mcpgw_12345678_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG',
-  'wp-consumer-secret-live-12345'
+  'wp-consumer-secret-live-12345',
+  'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 ]
 
 [[rules]]

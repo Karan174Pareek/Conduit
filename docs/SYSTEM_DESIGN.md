@@ -26,6 +26,18 @@ This document outlines the architectural decisions, aggregation and routing topo
 
 ---
 
+### 1.4 Architectural Decision: WooCommerce REST API vs. WP-CLI
+Conduit couples upstream store operations to WooCommerce through its authenticated REST API (`woo-mcp` adapter) rather than invoking `wp-cli` command-line processes or direct SQL mutations.
+
+| Dimension | WooCommerce REST API (`woo-mcp` In-Cluster) | WP-CLI / Pod Exec Execution |
+|---|---|---|
+| **Security & RBAC** | Uses scoped, revocable HTTP Bearer/Consumer credentials. Workloads require **zero** Kubernetes RBAC privileges (`automountServiceAccountToken: false`). | Requires Kubernetes `pods/exec` create rights or shell access inside the WordPress container, violating least-privilege principles and exposing the container filesystem. |
+| **Business Logic & Hooks** | Executes the full WordPress/WooCommerce lifecycle (actions, filters, inventory reservation, tax calculations, webhook triggers, customer email notifications). | Direct CLI mutations or SQL updates bypass hooks, creating inventory drift, uncalculated tax liabilities, and missing transactional events. |
+| **Network Decoupling & Portability** | Runs as an isolated microservice behind its own `NetworkPolicy`. Can connect identically to in-cluster WooCommerce or remote external stores without architecture changes. | Hard-coupled to container process boundaries; cannot operate against remote or external managed WooCommerce hosting. |
+| **Concurrency & Failure Isolation** | Handled by Apache worker processes with standard keepalive, timeouts, and connection pooling. Circuit breaker enforces bulkheads. | Each invocation forks a heavy PHP runtime process, introducing CPU/memory exhaustion risks under concurrent tool invocation loops. |
+
+---
+
 ## 2. Aggregation, Routing & Failure Handling
 
 ```mermaid

@@ -5,7 +5,7 @@ export class GeminiLlmClient implements LlmClient {
   private client: GoogleGenAI;
   private model: string;
 
-  constructor(apiKey: string, model = 'gemini-2.5-flash') {
+  constructor(apiKey: string, model = 'gemini-3.8-flash') {
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY is required to initialize GeminiLlmClient');
     }

@@ -14,7 +14,7 @@ data:
   BOOTSTRAP_ADMIN_EMAIL: "admin@conduit.{{ .Values.global.domain }}"
   LOG_LEVEL: "info"
   WOO_MCP_URL: "http://store-woocommerce-store-woo-mcp.store-default.svc.cluster.local:3100/mcp"
-  GEMINI_MODEL: "gemini-2.5-flash"
+  GEMINI_MODEL: {{ .Values.chat.model | default "gemini-3.8-flash" | quote }}
   CHAT_CONFIRM_DESTRUCTIVE: {{ .Values.chat.confirmDestructive | default false | quote }}
   POLICY_MEMBERS_READ_ONLY: {{ eq .Values.policy.defaultMember "deny" | quote }}
   SSRF_ALLOWED_HOSTS: "store-woocommerce-store-woo-mcp.store-default.svc.cluster.local,notes-mcp.conduit-system.svc.cluster.local,utils-mcp.conduit-system.svc.cluster.local"

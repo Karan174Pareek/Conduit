@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
+import { FormInput } from '../components/ui/FormInput';
+import { EyeIcon, EyeOffIcon, AlertTriangleIcon, CheckCircleIcon } from '../components/ui/Icons';
 
 export const AcceptInvitePage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -12,6 +13,7 @@ export const AcceptInvitePage: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -25,8 +27,8 @@ export const AcceptInvitePage: React.FC = () => {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters long.');
+    if (password.length < 12) {
+      setError('Password must be at least 12 characters long.');
       return;
     }
 
@@ -55,70 +57,98 @@ export const AcceptInvitePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100">
+    <main className="min-h-screen bg-canvas flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 text-txt-primary">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="w-12 h-12 rounded-xl bg-cyan-600 mx-auto flex items-center justify-center font-bold text-2xl text-white shadow-lg mb-4">
+        <div className="w-12 h-12 rounded-xl bg-brand mx-auto flex items-center justify-center font-bold text-2xl text-brand-text shadow-card mb-4">
           C
         </div>
-        <h2 className="text-3xl font-extrabold tracking-tight text-white">Join Conduit Team</h2>
-        <p className="mt-2 text-sm text-slate-400">Set up your account to access the gateway</p>
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-txt-primary">
+          Join Conduit Team
+        </h1>
+        <p className="mt-2 text-sm text-txt-secondary">
+          Set up your team member account to access the gateway
+        </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-900 py-8 px-4 shadow-xl border border-slate-800 sm:rounded-lg sm:px-10">
+        <div className="bg-card py-8 px-5 sm:px-10 shadow-card border border-border rounded-xl">
           {error && (
-            <div className="mb-6 p-4 rounded-md bg-rose-950/50 border border-rose-800 text-rose-200 text-sm">
-              {error}
+            <div
+              role="alert"
+              className="mb-6 p-4 rounded-lg bg-status-error-bg border border-status-error-border text-status-error-text text-sm flex items-start gap-3"
+            >
+              <AlertTriangleIcon className="w-5 h-5 shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
 
           {success ? (
-            <div className="p-4 rounded-md bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-sm text-center space-y-3">
-              <p className="font-semibold">Invitation accepted successfully!</p>
-              <p className="text-xs text-emerald-300">Redirecting to login...</p>
-              <Link to="/login" className="inline-block text-cyan-400 hover:underline text-xs">
+            <div
+              role="status"
+              className="p-5 rounded-lg bg-status-success-bg border border-status-success-border text-status-success-text text-sm text-center space-y-3"
+            >
+              <div className="flex items-center justify-center">
+                <CheckCircleIcon className="w-8 h-8 text-brand" />
+              </div>
+              <p className="font-semibold text-base">Invitation accepted successfully!</p>
+              <p className="text-xs text-txt-secondary">Redirecting to login...</p>
+              <Link to="/login" className="inline-block text-brand hover:underline text-xs font-medium">
                 Click here if not redirected automatically
               </Link>
             </div>
           ) : (
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <Input
+            <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+              <FormInput
                 id="invite-name"
                 label="Display Name"
                 type="text"
+                autoComplete="name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="Jane Doe"
               />
 
-              <Input
+              <FormInput
                 id="invite-password"
-                label="Password"
-                type="password"
+                label="New Password"
+                type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                helperText="Minimum 8 characters"
+                helperText="Minimum 12 characters. Checked against common password denylists."
+                rightAction={
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-xs text-txt-secondary hover:text-txt-primary flex items-center gap-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand rounded p-0.5"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
+                    <span>{showPassword ? 'Hide' : 'Show'}</span>
+                  </button>
+                }
               />
 
-              <Input
+              <FormInput
                 id="invite-confirm-password"
                 label="Confirm Password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
               />
 
-              <Button type="submit" fullWidth isLoading={loading} disabled={!token}>
-                Complete Setup & Join
-              </Button>
+              <div className="pt-2">
+                <Button type="submit" variant="primary" fullWidth loading={loading} disabled={!token}>
+                  Complete Setup & Join
+                </Button>
+              </div>
             </form>
           )}
         </div>
       </div>
-    </div>
+    </main>
   );
 };

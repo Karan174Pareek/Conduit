@@ -71,7 +71,7 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         run: |
-          npx @cyclonedx/cyclonedx-npm --output-file conduit-sbom.json
+          npx --yes @cyclonedx/cyclonedx-npm --output-file conduit-sbom.json
 
       - name: Upload SBOM Artifact
         uses: actions/upload-artifact@v4.4.3
@@ -96,7 +96,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trivy Filesystem Scan (Vuln, Misconfig, Secret)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -115,7 +115,7 @@ jobs:
           docker build -t conduit/woo-mcp:ci -f apps/woo-mcp/Dockerfile .
 
       - name: Trivy Gateway Image Scan
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'conduit/gateway:ci'
           format: 'table'
@@ -123,7 +123,7 @@ jobs:
           exit-code: '1'
 
       - name: Trivy Dashboard Image Scan
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'conduit/dashboard:ci'
           format: 'table'

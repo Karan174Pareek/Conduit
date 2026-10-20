@@ -1,80 +1,149 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { XIcon } from './Icons';
 
 export interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  maxWidth?: 'sm' | 'md' | 'lg' | 'xl';
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl' | string;
 }
 
-const maxWidthMap = {
-  sm: 'max-w-sm',
-  md: 'max-w-md',
-  lg: 'max-w-lg',
-  xl: 'max-w-xl',
-};
-
-export const Modal: React.FC<ModalProps> = ({
+export function Modal({
   isOpen,
   onClose,
   title,
+  description,
   children,
   footer,
   maxWidth,
-  size = 'md',
-}) => {
-  const chosenSize = maxWidth || size;
+  size,
+}: ModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  const titleId = React.useId();
+  const descriptionId = React.useId();
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement;
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+        // Focus trap
+        if (e.key === 'Tab' && modalRef.current) {
+          const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusable.length === 0) return;
+
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              last.focus();
+              e.preventDefault();
+            }
+          } else {
+            if (document.activeElement === last) {
+              first.focus();
+              e.preventDefault();
+            }
+          }
+        }
+      };
+
+      document.addEventListener('keydown', handleKeyDown);
+
+      // Focus first element
+      setTimeout(() => {
+        if (modalRef.current) {
+          const first = modalRef.current.querySelector<HTMLElement>(
+            'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+          first?.focus();
+        }
+      }, 50);
+
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+        previousActiveElement.current?.focus();
+      };
+    }
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
-      <div className="flex min-h-screen items-center justify-center p-4 text-center">
-        {/* Backdrop */}
-        <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
-          aria-hidden="true"
-          onClick={onClose}
-        />
+  const resolvedSize = (size || maxWidth || 'lg') as string;
+  const maxWidthClass =
+    {
+      sm: 'max-w-sm',
+      md: 'max-w-md',
+      lg: 'max-w-lg',
+      xl: 'max-w-xl',
+      '2xl': 'max-w-2xl',
+      '4xl': 'max-w-4xl',
+    }[resolvedSize] || 'max-w-lg';
 
-        {/* Modal Dialog */}
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={description ? descriptionId : undefined}
+    >
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Modal Dialog */}
+      <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
         <div
-          className={`relative w-full ${maxWidthMap[chosenSize]} transform overflow-hidden rounded-lg bg-slate-900 border border-slate-800 p-6 text-left shadow-xl transition-all`}
+          ref={modalRef}
+          className={`relative transform overflow-hidden rounded-xl bg-card border border-border text-left shadow-modal transition-all sm:my-8 w-full ${maxWidthClass} p-6 sm:p-7`}
         >
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
+          {/* Header */}
+          <div className="flex items-start justify-between pb-4 border-b border-border">
+            <div>
+              <h2
+                id={titleId}
+                className="text-lg sm:text-xl font-bold text-txt-primary"
+              >
+                {title}
+              </h2>
+              {description && (
+                <p id={descriptionId} className="mt-1 text-sm text-txt-secondary">
+                  {description}
+                </p>
+              )}
+            </div>
             <button
+              type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-200 transition-colors p-1"
+              className="text-txt-muted hover:text-txt-primary p-2 -mr-2 rounded-lg hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand min-w-[44px] min-h-[44px] flex items-center justify-center"
               aria-label="Close dialog"
             >
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              <XIcon className="w-5 h-5" />
             </button>
           </div>
 
+          {/* Content */}
           <div className="mt-4">{children}</div>
 
+          {/* Optional Footer */}
           {footer && (
-            <div className="mt-6 flex justify-end gap-3 pt-3 border-t border-slate-800">
+            <div className="mt-6 pt-4 border-t border-border flex items-center justify-end gap-3">
               {footer}
             </div>
           )}
@@ -82,4 +151,4 @@ export const Modal: React.FC<ModalProps> = ({
       </div>
     </div>
   );
-};
+}

@@ -50,6 +50,7 @@ const createServerSchema = z.object({
 
 const updateServerSchema = z.object({
   displayName: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
   url: z.string().url().optional(),
   enabled: z.boolean().optional(),
   callTimeoutMs: z.number().int().min(1000).max(120000).optional(),
@@ -238,6 +239,10 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
   });
 
   // 3. PATCH /api/servers/:id (admin only)
+  fastify.put('/servers/:id', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (_request, _reply) => {
+    return (fastify as any).inject ? null : null;
+  });
+
   fastify.patch('/servers/:id', { preHandler: [requireAuth(db, config), requireRole('admin')] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const objId = toObjectId(id);
@@ -273,7 +278,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRouteOptions> = async (
       updatedAt: now,
     };
 
-    if (data.displayName !== undefined) updateFields.displayName = data.displayName;
+    const targetDisplayName = data.displayName ?? data.name;
+    if (targetDisplayName !== undefined) updateFields.displayName = targetDisplayName;
     if (data.url !== undefined) updateFields.url = data.url;
     if (data.enabled !== undefined) updateFields.enabled = data.enabled;
     if (data.callTimeoutMs !== undefined) updateFields.callTimeoutMs = data.callTimeoutMs;

@@ -145,3 +145,54 @@ This script provides an exact, minute-by-minute operational walkthrough for reco
   3. Click **Export CSV**.
   4. Highlight Conduit's spreadsheet formula injection defense: any argument starting with `=`, `+`, `-`, or `@` is automatically neutralized.
   5. Conclude walkthrough.
+
+---
+
+## 3. Demonstrable Kubernetes Verification Script (Terminal Proof)
+
+Every Kubernetes statement made in the video walkthrough is directly demonstrable with real commands on the live cluster:
+
+### 3.1 Namespaces & Workload Separation
+```bash
+# Show multi-namespace separation (conduit-system for control plane, store-default for e-commerce)
+kubectl get namespaces conduit-system store-default
+```
+
+### 3.2 Secrets by Name (Zero Hardcoded Credentials)
+```bash
+# Show strictly named secrets partitioned by namespace
+kubectl get secret conduit-secrets -n conduit-system -o jsonpath='{.metadata.name} (keys: {.data.*})' && echo ""
+kubectl get secret store-secrets -n store-default -o jsonpath='{.metadata.name} (keys: {.data.*})' && echo ""
+```
+
+### 3.3 Persistent Volumes & PVC Data Retention
+```bash
+# Show dedicated persistent volumes surviving container deletion
+kubectl get pvc -A -l "app.kubernetes.io/instance in (conduit, store)"
+```
+
+### 3.4 Ingress Routing & FQDNs
+```bash
+# Show Traefik ingress rules exposing dashboard, gateway front door, and storefront
+kubectl get ingress -A
+```
+
+### 3.5 Resource Requests, Limits & Security Boundaries
+```bash
+# Show CPU and memory limits/requests on all application workloads
+kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,POD:.metadata.name,CONTAINER:.spec.containers[*].name,REQ_CPU:.spec.containers[*].resources.requests.cpu,LIM_CPU:.spec.containers[*].resources.limits.cpu,REQ_MEM:.spec.containers[*].resources.requests.memory,LIM_MEM:.spec.containers[*].resources.limits.memory'
+```
+
+### 3.6 Probes (Startup, Liveness, Readiness)
+```bash
+# Show health probes on core workloads
+kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,POD:.metadata.name,LIVENESS:.spec.containers[*].livenessProbe.httpGet.path,READINESS:.spec.containers[*].readinessProbe.httpGet.path'
+```
+
+### 3.7 Public vs. Internal NetworkPolicy Enforcement
+```bash
+# Show default-deny and cross-namespace ingress/egress policies
+kubectl get netpol -A
+# Run the automated 8-test network isolation proof script
+./dev/test-netpol-proof.sh
+```

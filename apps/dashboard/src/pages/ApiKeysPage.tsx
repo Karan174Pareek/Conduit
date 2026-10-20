@@ -4,29 +4,30 @@ import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/ui/Toast';
 import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
-import { Table, Column } from '../components/ui/Table';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { PageHeader } from '../components/ui/PageHeader';
+import { DataTable, Column } from '../components/ui/DataTable';
 import { Modal } from '../components/ui/Modal';
-import { Input } from '../components/ui/Input';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { FormInput } from '../components/ui/FormInput';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Tabs } from '../components/ui/Tabs';
+import {
+  KeyIcon,
+  PlusIcon,
+  AlertTriangleIcon,
+  CheckCircleIcon,
+  TrashIcon,
+} from '../components/ui/Icons';
 
 interface ApiKeyItem {
   id: string;
   name: string;
   prefix: string;
-  last4?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
   ownerId: string;
-  revokedAt: string | null;
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
-interface CreatedKeyResponse {
-  id: string;
-  name: string;
-  prefix: string;
-  key: string;
-  createdAt: string;
 }
 
 export const ApiKeysPage: React.FC = () => {
@@ -35,30 +36,31 @@ export const ApiKeysPage: React.FC = () => {
   const { addToast } = useToast();
   const queryClient = useQueryClient();
 
-  // Active view tab for admins: 'my' vs 'all'
   const [activeTab, setActiveTab] = useState<'my' | 'all'>('my');
-
-  // Create Key modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
 
-  // One-time reveal modal state
+  // One-time reveal state - auto-cleared upon closing
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [savedCheckbox, setSavedCheckbox] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
 
-  // 1. Fetch Keys
-  const { data: keysData, isLoading: loadingKeys } = useQuery({
+  // Revocation state
+  const [keyToRevoke, setKeyToRevoke] = useState<ApiKeyItem | null>(null);
+
+  // 1. Fetch API Keys
+  const { data: keysData, isLoading: loadingKeys } = useQuery<ApiKeyItem[]>({
     queryKey: ['api-keys'],
     queryFn: async () => {
       const res = await apiClient.get<{ keys: ApiKeyItem[] }>('/api/keys');
-      return res.keys;
+      return res.keys || [];
     },
   });
 
   // 2. Create Key Mutation
   const createKeyMutation = useMutation({
     mutationFn: async (name: string) => {
-      return apiClient.post<CreatedKeyResponse>('/api/keys', { name });
+      return apiClient.post<{ key: string; item: ApiKeyItem }>('/api/keys', { name });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
@@ -67,6 +69,7 @@ export const ApiKeysPage: React.FC = () => {
       // Open reveal modal
       setRevealedKey(data.key);
       setSavedCheckbox(false);
+      setCopiedKey(false);
       addToast('API Key created successfully', 'success');
     },
     onError: (err: any) => {
@@ -81,23 +84,26 @@ export const ApiKeysPage: React.FC = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] });
-      addToast('API Key revoked', 'success');
+      addToast('API Key revoked successfully', 'success');
+      setKeyToRevoke(null);
     },
     onError: (err: any) => {
       addToast(err?.message || 'Failed to revoke API key', 'error');
     },
   });
 
-  // Safe close that clears the revealed secret from memory completely
+  // Safe close that wipes the revealed secret from memory completely
   const closeRevealModal = () => {
     setRevealedKey(null);
     setSavedCheckbox(false);
+    setCopiedKey(false);
   };
 
   const copyKeyToClipboard = () => {
     if (revealedKey) {
       navigator.clipboard.writeText(revealedKey);
-      addToast('Copied API key to clipboard!', 'info');
+      setCopiedKey(true);
+      addToast('Copied API key to clipboard', 'info');
     }
   };
 
@@ -111,11 +117,13 @@ export const ApiKeysPage: React.FC = () => {
   const columns: Column<ApiKeyItem>[] = [
     {
       key: 'name',
-      header: 'Key Name',
+      header: 'Key Name & Prefix',
       render: (k: ApiKeyItem) => (
         <div>
-          <div className="font-medium text-white">{k.name}</div>
-          <div className="text-xs font-mono text-slate-400">Prefix: {k.prefix}...</div>
+          <div className="font-semibold text-text-primary">{k.name}</div>
+          <div className="text-xs font-mono text-text-muted mt-0.5">
+            Prefix: <span className="text-brand font-semibold">{k.prefix}</span>••••••••
+          </div>
         </div>
       ),
     },
@@ -123,36 +131,37 @@ export const ApiKeysPage: React.FC = () => {
       key: 'status',
       header: 'Status',
       render: (k: ApiKeyItem) => (
-        <Badge variant={k.revokedAt ? 'danger' : 'success'}>
-          {k.revokedAt ? 'Revoked' : 'Active'}
-        </Badge>
+        <StatusBadge
+          status={k.revokedAt ? 'disabled' : 'connected'}
+          label={k.revokedAt ? 'Revoked' : 'Active'}
+        />
       ),
     },
     ...(isAdmin && activeTab === 'all'
       ? [
           {
             key: 'ownerId',
-            header: 'Owner ID',
+            header: 'Owner Principal',
             render: (k: ApiKeyItem) => (
-              <span className="text-xs font-mono text-slate-400">{k.ownerId}</span>
+              <span className="text-xs font-mono text-text-secondary">{k.ownerId}</span>
             ),
           },
         ]
       : []),
     {
       key: 'lastUsedAt',
-      header: 'Last Used',
+      header: 'Last Active',
       render: (k: ApiKeyItem) => (
-        <span className="text-xs text-slate-400">
-          {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : 'Never'}
+        <span className="text-xs text-text-muted">
+          {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : 'Never used'}
         </span>
       ),
     },
     {
       key: 'createdAt',
-      header: 'Created',
+      header: 'Created On',
       render: (k: ApiKeyItem) => (
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-text-muted">
           {new Date(k.createdAt).toLocaleDateString()}
         </span>
       ),
@@ -167,13 +176,18 @@ export const ApiKeysPage: React.FC = () => {
             <Button
               variant="danger"
               size="sm"
-              onClick={() => revokeKeyMutation.mutate(k.id)}
+              onClick={() => {
+                if (window.confirm(`Revoke API Key "${k.name}"? This action cannot be undone.`)) {
+                  revokeKeyMutation.mutate(k.id);
+                }
+              }}
               isLoading={revokeKeyMutation.isPending}
+              leftIcon={<TrashIcon className="w-3.5 h-3.5" />}
             >
               Revoke
             </Button>
           ) : (
-            <span className="text-xs text-slate-500 italic">Revoked</span>
+            <span className="text-xs text-text-muted italic">Revoked</span>
           )}
         </div>
       ),
@@ -182,53 +196,51 @@ export const ApiKeysPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">API Keys</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Authentication credentials for MCP clients (Cursor, Claude Code, MCP Inspector).
-          </p>
-        </div>
-        <Button onClick={() => setShowCreateModal(true)}>Create API Key</Button>
-      </div>
+      <PageHeader
+        title="API Keys"
+        description="Bearer authentication tokens for MCP clients (Cursor, Claude Code, MCP Inspector)."
+        breadcrumbs={[{ label: 'Dashboard' }, { label: 'API Keys' }]}
+        actions={
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            leftIcon={<PlusIcon className="w-4 h-4" />}
+          >
+            Create API Key
+          </Button>
+        }
+      />
 
       {/* Admin Tabs */}
       {isAdmin && (
-        <div className="flex space-x-2 border-b border-slate-800 pb-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('my')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'my'
-                ? 'bg-slate-800 text-white font-semibold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            My API Keys
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('all')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'all'
-                ? 'bg-slate-800 text-white font-semibold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            All Keys (Admin Overview)
-          </button>
-        </div>
+        <Tabs
+          tabs={[
+            { id: 'my', label: 'My API Keys' },
+            { id: 'all', label: 'All Organization Keys (Admin Audit)' },
+          ]}
+          activeTab={activeTab}
+          onChange={(id) => setActiveTab(id as 'my' | 'all')}
+        />
       )}
 
-      <Table<ApiKeyItem>
+      <DataTable<ApiKeyItem>
         columns={columns}
         data={displayedKeys}
-        keyExtractor={(item: ApiKeyItem) => item.id}
+        keyExtractor={(item) => item.id}
         isLoading={loadingKeys}
-        emptyMessage={
-          activeTab === 'my'
-            ? 'You have not created any API keys yet.'
-            : 'No API keys exist in the system.'
+        emptyState={
+          <EmptyState
+            icon={<KeyIcon className="w-10 h-10 text-text-muted" />}
+            title={activeTab === 'my' ? 'No API Keys Generated' : 'No API Keys In System'}
+            description="Create an API key to connect your local development tools to the Conduit MCP gateway."
+            action={
+              <Button
+                onClick={() => setShowCreateModal(true)}
+                leftIcon={<PlusIcon className="w-4 h-4" />}
+              >
+                Create API Key
+              </Button>
+            }
+          />
         }
       />
 
@@ -247,21 +259,33 @@ export const ApiKeysPage: React.FC = () => {
           }}
           className="space-y-4"
         >
-          <Input
+          <FormInput
             id="key-name"
             label="Key Name / Description"
             required
             value={newKeyName}
             onChange={(e) => setNewKeyName(e.target.value)}
-            placeholder="e.g. Cursor Work Laptop, Claude Code Dev"
-            helperText="A descriptive label so you can identify where this key is used."
+            placeholder="e.g. Cursor MacBook Pro, Claude Code Dev"
+            helperText="A descriptive label so you can recognize this credential in audit logs."
           />
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-800">
-            <Button type="button" variant="secondary" onClick={() => setShowCreateModal(false)}>
+          <div className="flex justify-end gap-3 pt-4 border-t border-border-default">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowCreateModal(false)}
+            >
               Cancel
             </Button>
-            <Button type="submit" isLoading={createKeyMutation.isPending}>
+            <Button
+              type="submit"
+              isLoading={createKeyMutation.isPending}
+              onClick={() => {
+                if (newKeyName.trim()) {
+                  createKeyMutation.mutate(newKeyName.trim());
+                }
+              }}
+            >
               Generate Key
             </Button>
           </div>
@@ -271,8 +295,13 @@ export const ApiKeysPage: React.FC = () => {
       {/* One-Time Reveal Modal */}
       <Modal
         isOpen={!!revealedKey}
-        onClose={closeRevealModal}
+        onClose={() => {
+          if (savedCheckbox) {
+            closeRevealModal();
+          }
+        }}
         title="Your New API Key"
+        size="lg"
         footer={
           <div className="flex justify-end">
             <Button
@@ -285,43 +314,76 @@ export const ApiKeysPage: React.FC = () => {
           </div>
         }
       >
-        <div className="space-y-4">
-          <div className="p-3 bg-amber-950/40 border border-amber-800 rounded-lg text-amber-200 text-xs">
-            <strong>Important:</strong> Please copy your API key now. For security, it will{' '}
-            <span className="underline">never</span> be shown again.
+        <div className="space-y-5">
+          {/* Unmissable Warning Banner */}
+          <div className="p-4 bg-surface-warning border-2 border-border-warning rounded-lg text-text-warning text-xs space-y-1.5">
+            <div className="flex items-center gap-2 font-bold text-sm">
+              <AlertTriangleIcon className="w-5 h-5 flex-shrink-0" />
+              <span>One-Time Secret Key Display</span>
+            </div>
+            <p className="leading-relaxed">
+              This secret credential will <strong>never be shown again</strong>. Conduit stores only a
+              cryptographic hash (SHA-256) of your API key in accordance with our security model.
+              If you lose this key, you must revoke it and generate a new one.
+            </p>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+            <label
+              htmlFor="revealed-key-input"
+              className="block text-xs font-bold text-text-secondary uppercase tracking-wider mb-2"
+            >
               Secret API Key
             </label>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2">
               <input
+                id="revealed-key-input"
                 type="text"
                 readOnly
                 value={revealedKey || ''}
-                className="flex-1 bg-slate-900 border border-cyan-800 rounded-lg px-3 py-2 text-xs font-mono text-cyan-300 select-all"
+                className="flex-1 bg-surface-subtle border-2 border-brand/40 rounded-lg px-3 py-2.5 text-xs font-mono text-brand font-semibold select-all focus:outline-none focus:ring-2 focus:ring-brand"
               />
-              <Button size="sm" onClick={copyKeyToClipboard}>
-                Copy
+              <Button
+                variant={copiedKey ? 'secondary' : 'primary'}
+                onClick={copyKeyToClipboard}
+                leftIcon={copiedKey ? <CheckCircleIcon className="w-4 h-4 text-text-success" /> : undefined}
+              >
+                {copiedKey ? 'Copied!' : 'Copy'}
               </Button>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 pt-2">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-subtle border border-border-default">
             <input
               type="checkbox"
               id="saved-check"
               checked={savedCheckbox}
               onChange={(e) => setSavedCheckbox(e.target.checked)}
-              className="rounded bg-slate-900 border-slate-700 text-cyan-600 focus:ring-cyan-500 h-4 w-4"
+              className="mt-0.5 rounded bg-surface-panel border-border-default text-brand focus:ring-brand h-4 w-4"
             />
-            <label htmlFor="saved-check" className="text-xs text-slate-300 select-none cursor-pointer">
+            <label
+              htmlFor="saved-check"
+              className="text-xs text-text-primary select-none cursor-pointer font-medium leading-relaxed"
+            >
               I have saved this API key in a secure location
             </label>
           </div>
         </div>
       </Modal>
+
+      {/* Revocation ConfirmDialog */}
+      {keyToRevoke && (
+        <ConfirmDialog
+          isOpen={!!keyToRevoke}
+          onClose={() => setKeyToRevoke(null)}
+          onConfirm={() => revokeKeyMutation.mutate(keyToRevoke.id)}
+          title={`Revoke API Key: ${keyToRevoke.name}`}
+          message={`Are you sure you want to revoke key "${keyToRevoke.name}" (prefix: ${keyToRevoke.prefix})? Any active MCP client or session using this key will immediately be denied access.`}
+          confirmText="Revoke API Key"
+          variant="danger"
+          isLoading={revokeKeyMutation.isPending}
+        />
+      )}
     </div>
   );
 };
