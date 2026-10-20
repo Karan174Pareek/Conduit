@@ -57,7 +57,7 @@ ensure_var "BOOTSTRAP_ADMIN_PASSWORD" "$(random_hex)"
 
 # Ensure GEMINI_API_KEY (never overwrite if present, defaults to empty or env if absent)
 ensure_var "GEMINI_API_KEY" "${GEMINI_API_KEY:-}"
-ensure_var "GEMINI_MODEL" "gemini-2.5-flash"
+ensure_var "GEMINI_MODEL" "gemini-3.8-flash"
 
 # Ensure MongoDB credentials
 ensure_var "MONGO_ROOT_USER" "root"

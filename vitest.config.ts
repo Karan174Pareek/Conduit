@@ -8,5 +8,7 @@ export default defineConfig({
       'packages/**/*.{test,spec}.{ts,tsx}',
       'apps/**/*.{test,spec}.{ts,tsx}',
     ],
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });

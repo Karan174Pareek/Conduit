@@ -32,7 +32,7 @@ export const configSchema = z.object({
     .string()
     .min(8, 'BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters'),
   GEMINI_API_KEY: z.string().optional().default(''),
-  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+  GEMINI_MODEL: z.string().default('gemini-3.8-flash'),
   PUBLIC_DASHBOARD_URL: z.string().default('http://dashboard.localhost'),
   PUBLIC_GATEWAY_URL: z.string().default('http://gateway.localhost'),
   ALLOWED_ORIGINS: z.string().default('http://dashboard.localhost'),

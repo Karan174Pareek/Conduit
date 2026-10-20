@@ -29,7 +29,7 @@ describe('Gateway Integration Tests with Real MongoDB', { timeout: 30000 }, () =
     LOG_LEVEL: 'warn',
     ENABLE_DEBUG_ROUTES: true,
     GEMINI_API_KEY: '',
-    GEMINI_MODEL: 'gemini-2.5-flash',
+    GEMINI_MODEL: 'gemini-3.8-flash',
   };
 
   beforeAll(async () => {
