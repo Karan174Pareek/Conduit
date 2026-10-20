@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ RUN npm ci
 RUN npm run build --workspace=@conduit/shared && npm run build --workspace=@conduit/gateway
 
 # Stage 2: Production runtime
-FROM node:22-alpine AS runner
+FROM node:26-alpine AS runner
 
 WORKDIR /app
 
