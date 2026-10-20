@@ -34,7 +34,8 @@ COPY --from=builder --chown=10001:10001 /app/apps/woo-mcp/package.json ./apps/wo
 
 # Install production dependencies only
 RUN npm ci --omit=dev --workspace=@conduit/woo-mcp --workspace=@conduit/shared && \
-    npm cache clean --force
+    npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /opt/yarn* /usr/local/bin/yarn*
 
 # Copy compiled code from builder
 COPY --from=builder --chown=10001:10001 /app/packages/shared/dist ./packages/shared/dist

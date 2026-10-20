@@ -32,9 +32,10 @@ COPY --from=builder --chown=10001:10001 /app/package.json /app/package-lock.json
 COPY --from=builder --chown=10001:10001 /app/packages/shared/package.json ./packages/shared/
 COPY --from=builder --chown=10001:10001 /app/apps/gateway/package.json ./apps/gateway/
 
-# Install production dependencies only
+# Install production dependencies only and remove npm CLI from production image (eliminates base image npm CVEs)
 RUN npm ci --omit=dev --workspace=@conduit/gateway --workspace=@conduit/shared && \
-    npm cache clean --force
+    npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy compiled code from builder
 COPY --from=builder --chown=10001:10001 /app/packages/shared/dist ./packages/shared/dist
