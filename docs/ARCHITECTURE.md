@@ -19,7 +19,8 @@
 | woo-mcp | Node + TS + MCP SDK | store-default | none (ClusterIP, gateway-only via NetworkPolicy) | Products/orders tools over the WC REST API |
 | wordpress | custom image: `wordpress` + WooCommerce + WP-CLI | store-default | Ingress `shop.<domain>` | Storefront and WP admin |
 | mariadb | official `mariadb` StatefulSet | store-default | none | Store database |
-| demo-notes-mcp | Node + TS | conduit-system | none | Second upstream (notes), has `ping` and `search` |
+| demo-notes-mcp | Node + TS | conduit-system | none | Second upstream (notes), has `ping`
+ and `search` |
 | demo-utils-mcp | Node + TS | conduit-system | none | Third upstream (time, calculator, units), has `ping` and `search` |
 | demo-rogue-mcp | Node + TS | conduit-system | none, off by default | Malicious-upstream demo (poisoned description, rug-pull toggle) |
 | provisioner (bonus) | Node + TS, Helm CLI | conduit-system | none | Store lifecycle; own ServiceAccount and RBAC |

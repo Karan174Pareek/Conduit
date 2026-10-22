@@ -14,10 +14,11 @@ async function main() {
   let adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL;
 
   if (!adminPassword) {
-    adminPassword = execSync(
-      'kubectl get secret conduit-secrets -n conduit-system -o jsonpath="{.data.BOOTSTRAP_ADMIN_PASSWORD}" | base64 -d',
+    const raw = execSync(
+      'kubectl get secret conduit-secrets -n conduit-system -o jsonpath="{.data.BOOTSTRAP_ADMIN_PASSWORD}"',
       { encoding: 'utf-8' },
     ).trim();
+    adminPassword = Buffer.from(raw, 'base64').toString('utf-8');
   }
 
   if (!adminEmail) {
@@ -71,7 +72,7 @@ async function main() {
   // 4. Member accepts invite with Argon2id password
   console.log('==> [4/9] Accepting invite and setting password (Argon2id)...');
   const memberPassword = 'MemberPassword123!Secure';
-  const acceptRes = await fetch(`${DASHBOARD_URL}/api/invites/accept`, {
+  const acceptRes = await fetch(`${DASHBOARD_URL}/api/auth/accept-invite`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
